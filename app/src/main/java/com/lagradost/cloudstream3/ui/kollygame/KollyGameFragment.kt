@@ -82,6 +82,59 @@ class KollyGameFragment : Fragment() {
 }
 
 @Composable
+fun FilterChipRow(
+    title: String,
+    items: List<String>,
+    selectedItem: String,
+    onItemSelected: (String) -> Unit
+) {
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(vertical = 4.dp),
+        verticalAlignment = Alignment.CenterVertically
+    ) {
+        Text(
+            text = title,
+            color = Color.Gray,
+            fontSize = 11.sp,
+            fontWeight = FontWeight.Bold,
+            modifier = Modifier
+                .width(55.dp)
+                .padding(start = 16.dp)
+        )
+        LazyRow(
+            contentPadding = PaddingValues(horizontal = 12.dp),
+            horizontalArrangement = Arrangement.spacedBy(8.dp)
+        ) {
+            items(items) { item ->
+                val isSelected = item == selectedItem
+                Box(
+                    modifier = Modifier
+                        .clip(RoundedCornerShape(8.dp))
+                        .background(if (isSelected) Color(0xFFFFD700) else Color(0xFF1E1E2C))
+                        .border(
+                            width = 1.dp,
+                            color = if (isSelected) Color(0xFFFFD700) else Color.Gray.copy(alpha = 0.2f),
+                            shape = RoundedCornerShape(8.dp)
+                        )
+                        .clickable { onItemSelected(item) }
+                        .padding(horizontal = 10.dp, vertical = 5.dp)
+                ) {
+                    Text(
+                        text = item,
+                        color = if (isSelected) Color.Black else Color.White,
+                        fontSize = 11.sp,
+                        fontWeight = if (isSelected) FontWeight.Bold else FontWeight.Normal
+                    )
+                }
+            }
+        }
+    }
+}
+
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
 fun KollywoodScreen(
     viewModel: KollyGameViewModel,
     onPlayMovieClick: (TmdbMovie) -> Unit
@@ -91,12 +144,25 @@ fun KollywoodScreen(
     var selectedMovie by remember { mutableStateOf<TmdbMovie?>(null) }
     val context = LocalContext.current
 
+    val searchQuery by viewModel.searchQuery.collectAsState()
+    val selectedGenre by viewModel.selectedGenre.collectAsState()
+    val selectedYear by viewModel.selectedYear.collectAsState()
+    val selectedRating by viewModel.selectedRating.collectAsState()
+    val selectedLanguage by viewModel.selectedLanguage.collectAsState()
+
+    val isSearching by viewModel.isSearching.collectAsState()
+    val searchResultMovies by viewModel.searchResultMovies.collectAsState()
+
+    val langMap = remember { mapOf("Tamil" to "ta", "Telugu" to "te", "Malayalam" to "ml", "Hindi" to "hi", "English" to "en") }
+    val reverseLangMap = remember { mapOf("ta" to "Tamil", "te" to "Telugu", "ml" to "Malayalam", "hi" to "Hindi", "en" to "English") }
+
     Box(
         modifier = Modifier
             .fillMaxSize()
             .background(Color(0xFF0F0F13))
     ) {
         Column(modifier = Modifier.fillMaxSize()) {
+            // Header Spotlights
             Box(
                 modifier = Modifier
                     .fillMaxWidth()
@@ -105,7 +171,7 @@ fun KollywoodScreen(
                             listOf(Color(0xFF1E0B36), Color(0xFF0B1436))
                         )
                     )
-                    .padding(horizontal = 20.dp, vertical = 16.dp)
+                    .padding(horizontal = 20.dp, vertical = 14.dp)
             ) {
                 Row(
                     modifier = Modifier.fillMaxWidth(),
@@ -113,9 +179,9 @@ fun KollywoodScreen(
                     horizontalArrangement = Arrangement.SpaceBetween
                 ) {
                     Text(
-                        text = "🎬 Kollywood Spotlight",
+                        text = "🎬 KollyCloud Spotlight",
                         color = Color(0xFFFFD700),
-                        fontSize = 22.sp,
+                        fontSize = 20.sp,
                         fontWeight = FontWeight.Black
                     )
                     IconButton(
@@ -131,44 +197,191 @@ fun KollywoodScreen(
                 }
             }
 
-            when (val state = uiState) {
-                is KollywoodUiState.Loading -> {
-                    Box(
-                        modifier = Modifier.fillMaxSize(),
-                        contentAlignment = Alignment.Center
+            // Search Bar Input
+            OutlinedTextField(
+                value = searchQuery,
+                onValueChange = {
+                    viewModel.searchQuery.value = it
+                    viewModel.searchAndFilterMovies(context)
+                },
+                placeholder = { Text("Search Tamil, Hindi, English Movies...", color = Color.Gray, fontSize = 13.sp) },
+                leadingIcon = { Icon(imageVector = Icons.Default.Search, contentDescription = null, tint = Color(0xFFFFD700)) },
+                trailingIcon = {
+                    if (searchQuery.isNotEmpty()) {
+                        IconButton(onClick = {
+                            viewModel.searchQuery.value = ""
+                            viewModel.searchAndFilterMovies(context)
+                        }) {
+                            Icon(imageVector = Icons.Default.Clear, contentDescription = null, tint = Color.Gray)
+                        }
+                    }
+                },
+                singleLine = true,
+                shape = RoundedCornerShape(12.dp),
+                colors = OutlinedTextFieldDefaults.colors(
+                    focusedTextColor = Color.White,
+                    unfocusedTextColor = Color.White,
+                    focusedContainerColor = Color(0xFF161622),
+                    unfocusedContainerColor = Color(0xFF161622),
+                    focusedBorderColor = Color(0xFFFFD700),
+                    unfocusedBorderColor = Color.Gray.copy(alpha = 0.2f)
+                ),
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(horizontal = 16.dp, vertical = 8.dp)
+            )
+
+            // Dynamic Advanced Chips Filter Drawer
+            Column(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .background(Color(0xFF0F0F13))
+                    .padding(bottom = 8.dp)
+            ) {
+                FilterChipRow(
+                    title = "Genre",
+                    items = listOf("All", "Action", "Adventure", "Animation", "Comedy", "Crime", "Drama", "Family", "Fantasy", "History", "Horror", "Music", "Mystery", "Romance", "Sci-Fi", "Thriller"),
+                    selectedItem = selectedGenre,
+                    onItemSelected = {
+                        viewModel.selectedGenre.value = it
+                        viewModel.searchAndFilterMovies(context)
+                    }
+                )
+                FilterChipRow(
+                    title = "Year",
+                    items = listOf("All", "2026", "2025", "2024", "2023", "2022", "2021", "2020", "2018", "2015", "2010", "2005", "2003", "2000"),
+                    selectedItem = selectedYear,
+                    onItemSelected = {
+                        viewModel.selectedYear.value = it
+                        viewModel.searchAndFilterMovies(context)
+                    }
+                )
+                FilterChipRow(
+                    title = "Rating",
+                    items = listOf("All", "8.0+", "7.0+", "6.0+", "5.0+"),
+                    selectedItem = selectedRating,
+                    onItemSelected = {
+                        viewModel.selectedRating.value = it
+                        viewModel.searchAndFilterMovies(context)
+                    }
+                )
+                FilterChipRow(
+                    title = "Lang",
+                    items = listOf("Tamil", "Telugu", "Malayalam", "Hindi", "English"),
+                    selectedItem = reverseLangMap[selectedLanguage] ?: "Tamil",
+                    onItemSelected = {
+                        val code = langMap[it] ?: "ta"
+                        viewModel.selectedLanguage.value = code
+                        viewModel.searchAndFilterMovies(context)
+                    }
+                )
+            }
+
+            // Divider
+            HorizontalDivider(color = Color.Gray.copy(alpha = 0.15f), thickness = 1.dp)
+
+            // Content Catalog
+            if (isSearching) {
+                Column(
+                    modifier = Modifier
+                        .fillMaxSize()
+                        .verticalScroll(rememberScrollState())
+                ) {
+                    Row(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(horizontal = 16.dp, vertical = 12.dp),
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.SpaceBetween
                     ) {
-                        CircularProgressIndicator(color = Color(0xFFFFD700))
+                        Text(
+                            text = "🔍 Advanced Results (${searchResultMovies.size})",
+                            color = Color(0xFFFFD700),
+                            fontSize = 16.sp,
+                            fontWeight = FontWeight.Bold
+                        )
+                        TextButton(
+                            onClick = {
+                                viewModel.searchQuery.value = ""
+                                viewModel.selectedGenre.value = "All"
+                                viewModel.selectedYear.value = "All"
+                                viewModel.selectedRating.value = "All"
+                                viewModel.selectedLanguage.value = "ta"
+                                viewModel.searchAndFilterMovies(context)
+                            }
+                        ) {
+                            Text("Reset", color = Color(0xFFFF6B6B), fontWeight = FontWeight.Bold, fontSize = 12.sp)
+                        }
+                    }
+
+                    if (searchResultMovies.isEmpty()) {
+                        Box(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .height(250.dp),
+                            contentAlignment = Alignment.Center
+                        ) {
+                            Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                                Icon(imageVector = Icons.Default.Search, contentDescription = null, tint = Color.Gray, modifier = Modifier.size(48.dp))
+                                Spacer(modifier = Modifier.height(12.dp))
+                                Text("No movies match your filters.", color = Color.Gray, fontSize = 13.sp)
+                            }
+                        }
+                    } else {
+                        // Display search result rows
+                        LazyRow(
+                            contentPadding = PaddingValues(horizontal = 16.dp),
+                            horizontalArrangement = Arrangement.spacedBy(12.dp),
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .padding(bottom = 40.dp)
+                        ) {
+                            items(searchResultMovies) { movie ->
+                                MovieRowCard(movie = movie, onClick = { selectedMovie = movie })
+                            }
+                        }
                     }
                 }
-                is KollywoodUiState.Success -> {
-                    KollywoodCatalog(
-                        viewModel = viewModel,
-                        trending = state.trending,
-                        topRated = state.topRated,
-                        upcoming = state.upcoming,
-                        isDemoMode = state.isDemoMode,
-                        errorMessage = null,
-                        onMovieClick = { selectedMovie = it },
-                        onRetryClick = { viewModel.fetchKollywoodMovies(context) }
-                    )
-                }
-                is KollywoodUiState.Error -> {
-                    if (state.fallbackTrending != null) {
+            } else {
+                when (val state = uiState) {
+                    is KollywoodUiState.Loading -> {
+                        Box(
+                            modifier = Modifier.fillMaxSize(),
+                            contentAlignment = Alignment.Center
+                        ) {
+                            CircularProgressIndicator(color = Color(0xFFFFD700))
+                        }
+                    }
+                    is KollywoodUiState.Success -> {
                         KollywoodCatalog(
                             viewModel = viewModel,
-                            trending = state.fallbackTrending,
-                            topRated = state.fallbackTopRated ?: emptyList(),
-                            upcoming = state.fallbackUpcoming ?: emptyList(),
-                            isDemoMode = true,
-                            errorMessage = state.message,
+                            trending = state.trending,
+                            topRated = state.topRated,
+                            upcoming = state.upcoming,
+                            isDemoMode = state.isDemoMode,
+                            errorMessage = null,
                             onMovieClick = { selectedMovie = it },
                             onRetryClick = { viewModel.fetchKollywoodMovies(context) }
                         )
-                    } else {
-                        ErrorStateScreen(
-                            message = state.message,
-                            onRetry = { viewModel.fetchKollywoodMovies(context) }
-                        )
+                    }
+                    is KollywoodUiState.Error -> {
+                        if (state.fallbackTrending != null) {
+                            KollywoodCatalog(
+                                viewModel = viewModel,
+                                trending = state.fallbackTrending,
+                                topRated = state.fallbackTopRated ?: emptyList(),
+                                upcoming = state.fallbackUpcoming ?: emptyList(),
+                                isDemoMode = true,
+                                errorMessage = state.message,
+                                onMovieClick = { selectedMovie = it },
+                                onRetryClick = { viewModel.fetchKollywoodMovies(context) }
+                            )
+                        } else {
+                            ErrorStateScreen(
+                                message = state.message,
+                                onRetry = { viewModel.fetchKollywoodMovies(context) }
+                            )
+                        }
                     }
                 }
             }
@@ -223,6 +436,7 @@ fun KollywoodCatalog(
     onRetryClick: () -> Unit
 ) {
     val scrollState = rememberScrollState()
+    val watchlistMovies by viewModel.watchlist.collectAsState()
 
     Column(
         modifier = Modifier
@@ -277,6 +491,12 @@ fun KollywoodCatalog(
         }
 
         Spacer(modifier = Modifier.height(8.dp))
+
+        // Watchlist Horizontal Carousel Section
+        if (watchlistMovies.isNotEmpty()) {
+            MovieRowSection(title = "📂 My Watchlist", movies = watchlistMovies, onMovieClick = onMovieClick)
+            Spacer(modifier = Modifier.height(16.dp))
+        }
 
         MovieRowSection(title = "🔥 Trending Tamil Movies", movies = trending, onMovieClick = onMovieClick)
         Spacer(modifier = Modifier.height(16.dp))
@@ -574,6 +794,39 @@ fun MovieDetailContent(
                         color = Color.Black,
                         fontWeight = FontWeight.Black,
                         fontSize = 15.sp
+                    )
+                }
+
+                val isAdded by remember(movie.id) { derivedStateOf { viewModel.isInWatchlist(movie) } }
+                Spacer(modifier = Modifier.height(10.dp))
+                OutlinedButton(
+                    onClick = {
+                        if (isAdded) {
+                            viewModel.removeFromWatchlist(context, movie)
+                        } else {
+                            viewModel.addToWatchlist(context, movie)
+                        }
+                    },
+                    border = BorderStroke(1.5.dp, if (isAdded) Color(0xFFFF6B6B) else Color(0xFFFFD700)),
+                    shape = RoundedCornerShape(12.dp),
+                    colors = ButtonDefaults.outlinedButtonColors(
+                        contentColor = if (isAdded) Color(0xFFFF6B6B) else Color(0xFFFFD700)
+                    ),
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .height(48.dp)
+                ) {
+                    Icon(
+                        imageVector = if (isAdded) Icons.Default.Favorite else Icons.Default.FavoriteBorder,
+                        contentDescription = "Watchlist",
+                        tint = if (isAdded) Color(0xFFFF6B6B) else Color(0xFFFFD700),
+                        modifier = Modifier.size(20.dp)
+                    )
+                    Spacer(modifier = Modifier.width(8.dp))
+                    Text(
+                        text = if (isAdded) "Remove from Watchlist" else "Add to Watchlist",
+                        fontWeight = FontWeight.Bold,
+                        fontSize = 14.sp
                     )
                 }
 
@@ -982,6 +1235,9 @@ fun YoutubePlayer(
                     mediaPlaybackRequiresUserGesture = false
                     loadWithOverviewMode = true
                     useWideViewPort = true
+                    allowFileAccess = true
+                    allowContentAccess = true
+                    databaseEnabled = true
                     userAgentString = "Mozilla/5.0 (Linux; Android 10; K) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Mobile Safari/537.36"
                 }
                 webChromeClient = android.webkit.WebChromeClient()
@@ -1004,7 +1260,7 @@ fun YoutubePlayer(
                         <iframe
                             width="100%"
                             height="100%"
-                            src="https://www.youtube-nocookie.com/embed/$youtubeVideoId?autoplay=1&rel=0&showinfo=0"
+                            src="https://www.youtube-nocookie.com/embed/$youtubeVideoId?autoplay=1&mute=1&controls=1&rel=0&showinfo=0"
                             title="Trailer"
                             frameborder="0"
                             allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture"
@@ -1064,6 +1320,9 @@ fun YoutubeSearchPlayer(
                     mediaPlaybackRequiresUserGesture = false
                     loadWithOverviewMode = true
                     useWideViewPort = true
+                    allowFileAccess = true
+                    allowContentAccess = true
+                    databaseEnabled = true
                     userAgentString = "Mozilla/5.0 (Linux; Android 10; K) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Mobile Safari/537.36"
                 }
                 webChromeClient = android.webkit.WebChromeClient()
@@ -1086,7 +1345,7 @@ fun YoutubeSearchPlayer(
                         <iframe
                             width="100%"
                             height="100%"
-                            src="https://www.youtube-nocookie.com/embed?listType=search&list=$encodedQuery&autoplay=1&rel=0&showinfo=0"
+                            src="https://www.youtube-nocookie.com/embed?listType=search&list=$encodedQuery&autoplay=1&mute=1&controls=1&rel=0&showinfo=0"
                             title="Trailer"
                             frameborder="0"
                             allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture"
