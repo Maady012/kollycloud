@@ -105,6 +105,34 @@ class KollyGameViewModel : ViewModel() {
         return _watchlist.value.any { it.id == movie.id }
     }
 
+    private val _watchedMovies = MutableStateFlow<Set<Long>>(emptySet())
+    val watchedMovies: StateFlow<Set<Long>> = _watchedMovies.asStateFlow()
+
+    fun loadWatchedMovies(ctx: Context) {
+        val prefs = ctx.getSharedPreferences("kolly_gaming_secure_prefs", Context.MODE_PRIVATE)
+        val stringSet = prefs.getStringSet("watched_movies_ids_v2", emptySet()) ?: emptySet()
+        _watchedMovies.value = stringSet.mapNotNull { it.toLongOrNull() }.toSet()
+    }
+
+    fun toggleWatchedMovie(ctx: Context, movieId: Long) {
+        val current = _watchedMovies.value.toMutableSet()
+        if (current.contains(movieId)) {
+            current.remove(movieId)
+            Log.d("KollyGameVM", "Removed movie from watched list: $movieId")
+        } else {
+            current.add(movieId)
+            Log.d("KollyGameVM", "Added movie to watched list: $movieId")
+        }
+        _watchedMovies.value = current
+        
+        val prefs = ctx.getSharedPreferences("kolly_gaming_secure_prefs", Context.MODE_PRIVATE)
+        prefs.edit().putStringSet("watched_movies_ids_v2", current.map { it.toString() }.toSet()).apply()
+    }
+
+    fun isMovieWatched(movieId: Long): Boolean {
+        return _watchedMovies.value.contains(movieId)
+    }
+
     // Active Search / Filter State
     private val _searchResultMovies = MutableStateFlow<List<TmdbMovie>>(emptyList())
     val searchResultMovies: StateFlow<List<TmdbMovie>> = _searchResultMovies.asStateFlow()
@@ -237,6 +265,7 @@ class KollyGameViewModel : ViewModel() {
 
     fun fetchKollywoodMovies(ctx: Context) {
         loadWatchlist(ctx)
+        loadWatchedMovies(ctx)
         viewModelScope.launch {
             val currentState = _kollywoodState.value
             val hasData = currentState is KollywoodUiState.Success || 
