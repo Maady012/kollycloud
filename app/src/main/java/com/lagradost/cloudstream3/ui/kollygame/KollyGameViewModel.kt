@@ -108,25 +108,39 @@ class KollyGameViewModel : ViewModel() {
     private val _watchedMovies = MutableStateFlow<Set<Long>>(emptySet())
     val watchedMovies: StateFlow<Set<Long>> = _watchedMovies.asStateFlow()
 
+    private val _watchedListMovies = MutableStateFlow<List<TmdbMovie>>(emptyList())
+    val watchedListMovies: StateFlow<List<TmdbMovie>> = _watchedListMovies.asStateFlow()
+
     fun loadWatchedMovies(ctx: Context) {
         val prefs = ctx.getSharedPreferences("kolly_gaming_secure_prefs", Context.MODE_PRIVATE)
         val stringSet = prefs.getStringSet("watched_movies_ids_v2", emptySet()) ?: emptySet()
         _watchedMovies.value = stringSet.mapNotNull { it.toLongOrNull() }.toSet()
+        val movies = getCachedMovies(ctx, "watched_list") ?: emptyList()
+        _watchedListMovies.value = movies
     }
 
-    fun toggleWatchedMovie(ctx: Context, movieId: Long) {
-        val current = _watchedMovies.value.toMutableSet()
-        if (current.contains(movieId)) {
-            current.remove(movieId)
-            Log.d("KollyGameVM", "Removed movie from watched list: $movieId")
+    fun toggleWatchedMovie(ctx: Context, movie: TmdbMovie) {
+        val currentIds = _watchedMovies.value.toMutableSet()
+        val currentMovies = _watchedListMovies.value.toMutableList()
+        
+        if (currentIds.contains(movie.id)) {
+            currentIds.remove(movie.id)
+            currentMovies.removeAll { it.id == movie.id }
+            Log.d("KollyGameVM", "Removed movie from watched list: ${movie.id}")
         } else {
-            current.add(movieId)
-            Log.d("KollyGameVM", "Added movie to watched list: $movieId")
+            currentIds.add(movie.id)
+            if (currentMovies.none { it.id == movie.id }) {
+                currentMovies.add(0, movie)
+            }
+            Log.d("KollyGameVM", "Added movie to watched list: ${movie.id}")
         }
-        _watchedMovies.value = current
+        
+        _watchedMovies.value = currentIds.toSet()
+        _watchedListMovies.value = currentMovies
         
         val prefs = ctx.getSharedPreferences("kolly_gaming_secure_prefs", Context.MODE_PRIVATE)
-        prefs.edit().putStringSet("watched_movies_ids_v2", current.map { it.toString() }.toSet()).apply()
+        prefs.edit().putStringSet("watched_movies_ids_v2", currentIds.map { it.toString() }.toSet()).apply()
+        saveCachedJson(ctx, "watched_list", currentMovies)
     }
 
     fun isMovieWatched(movieId: Long): Boolean {
