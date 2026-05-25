@@ -1198,6 +1198,11 @@ class MainActivity : AppCompatActivity(), ColorPickerDialogListener, BiometricCa
         updateLocale()
         super.onCreate(savedInstanceState)
         try {
+            com.lagradost.cloudstream3.ui.home.HomeChildItemAdapter.updatePosterSize(this)
+        } catch (t: Throwable) {
+            logError(t)
+        }
+        try {
             if (isCastApiAvailable()) {
                 CastContext.getSharedInstance(this) { it.run() }
                     .addOnSuccessListener { mSessionManager = it.sessionManager }

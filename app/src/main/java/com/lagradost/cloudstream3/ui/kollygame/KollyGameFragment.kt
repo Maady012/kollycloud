@@ -328,16 +328,39 @@ fun KollywoodScreen(
                             }
                         }
                     } else {
-                        // Display search result rows
-                        LazyRow(
-                            contentPadding = PaddingValues(horizontal = 16.dp),
-                            horizontalArrangement = Arrangement.spacedBy(12.dp),
+                        // Display search result in 2 columns and unlimited rows
+                        val chunked = searchResultMovies.chunked(2)
+                        Column(
                             modifier = Modifier
                                 .fillMaxWidth()
-                                .padding(bottom = 40.dp)
+                                .padding(horizontal = 16.dp)
+                                .padding(bottom = 40.dp),
+                            verticalArrangement = Arrangement.spacedBy(16.dp)
                         ) {
-                            items(searchResultMovies) { movie ->
-                                MovieRowCard(movie = movie, onClick = { selectedMovie = movie })
+                            chunked.forEach { pair ->
+                                Row(
+                                    modifier = Modifier.fillMaxWidth(),
+                                    horizontalArrangement = Arrangement.spacedBy(16.dp)
+                                ) {
+                                    Box(modifier = Modifier.weight(1f)) {
+                                        MovieRowCard(
+                                            movie = pair[0],
+                                            onClick = { selectedMovie = pair[0] },
+                                            modifier = Modifier.fillMaxWidth()
+                                        )
+                                    }
+                                    Box(modifier = Modifier.weight(1f)) {
+                                        if (pair.size > 1) {
+                                            MovieRowCard(
+                                                movie = pair[1],
+                                                onClick = { selectedMovie = pair[1] },
+                                                modifier = Modifier.fillMaxWidth()
+                                            )
+                                        } else {
+                                            Spacer(modifier = Modifier.fillMaxWidth())
+                                        }
+                                    }
+                                }
                             }
                         }
                     }
@@ -549,12 +572,11 @@ fun MovieRowSection(
 @Composable
 fun MovieRowCard(
     movie: TmdbMovie,
-    onClick: () -> Unit
+    onClick: () -> Unit,
+    modifier: Modifier = Modifier.width(135.dp)
 ) {
     Card(
-        modifier = Modifier
-            .width(135.dp)
-            .clickable(onClick = onClick),
+        modifier = modifier.clickable(onClick = onClick),
         shape = RoundedCornerShape(10.dp),
         colors = CardDefaults.cardColors(containerColor = Color(0xFF161622))
     ) {

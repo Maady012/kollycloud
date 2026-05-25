@@ -314,9 +314,48 @@ class KollyGameViewModel : ViewModel() {
         }
     }
 
+    private suspend fun searchYouTubeVideoId(query: String): String? {
+        return withContext(Dispatchers.IO) {
+            try {
+                val encodedQuery = java.net.URLEncoder.encode(query, "UTF-8")
+                val url = "https://www.youtube.com/results?search_query=$encodedQuery"
+                val connection = java.net.URL(url).openConnection() as java.net.HttpURLConnection
+                connection.setRequestProperty("User-Agent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36")
+                val html = connection.inputStream.bufferedReader().readText()
+                
+                // Try videoId pattern first (most reliable in ytInitialData)
+                val videoIdRegex = "\"videoId\":\"([a-zA-Z0-9_-]{11})\"".toRegex()
+                val match1 = videoIdRegex.find(html)
+                val id1 = match1?.groups?.get(1)?.value
+                if (!id1.isNullOrEmpty()) {
+                    Log.d("KollyGameVM", "Found YouTube videoId via regex: $id1")
+                    return@withContext id1
+                }
+                
+                // Try watch?v= pattern as fallback
+                val watchRegex = "/watch\\?v=([a-zA-Z0-9_-]{11})".toRegex()
+                val match2 = watchRegex.find(html)
+                val id2 = match2?.groups?.get(1)?.value
+                if (!id2.isNullOrEmpty()) {
+                    Log.d("KollyGameVM", "Found YouTube videoId via watch?v= regex: $id2")
+                    return@withContext id2
+                }
+                
+                Log.w("KollyGameVM", "No video ID matched in YouTube search HTML.")
+                null
+            } catch (e: Exception) {
+                Log.e("KollyGameVM", "Failed to search YouTube video ID", e)
+                null
+            }
+        }
+    }
+
     fun fetchMovieTrailer(ctx: Context, movieId: Long, movieTitle: String) {
-        if (_movieTrailers.value.containsKey(movieId) && _movieTrailers.value[movieId]?.startsWith("search:") == false) {
-            return
+        if (_movieTrailers.value.containsKey(movieId)) {
+            val current = _movieTrailers.value[movieId]
+            if (current != null && !current.startsWith("search:") && current.isNotEmpty()) {
+                return
+            }
         }
 
         viewModelScope.launch {
@@ -328,7 +367,7 @@ class KollyGameViewModel : ViewModel() {
                 }
 
                 val apiKey = getTmdbKey(ctx)
-                val url = "https://api.themoviedb.org/3/movie/$movieId/videos?api_key=$apiKey&language=en-US"
+                val url = "https://api.themoviedb.org/3/movie/$movieId/videos?api_key=$apiKey"
                 val json = withContext(Dispatchers.IO) { URL(url).openStream().bufferedReader().readText() }
                 val root = JSONObject(json)
                 val results = root.optJSONArray("results")
@@ -338,18 +377,23 @@ class KollyGameViewModel : ViewModel() {
                         val obj = results.getJSONObject(i)
                         val site = obj.optString("site")
                         val type = obj.optString("type")
-                        if (site.equals("YouTube", ignoreCase = true) && type.equals("Trailer", ignoreCase = true)) {
+                        if (site.equals("YouTube", ignoreCase = true) && (type.equals("Trailer", ignoreCase = true) || type.equals("Teaser", ignoreCase = true))) {
                             trailerKey = obj.optString("key")
                             break
                         }
                     }
                 }
 
-                val finalKey = trailerKey ?: "search:$movieTitle official trailer"
-                _movieTrailers.value = _movieTrailers.value + (movieId to finalKey)
+                if (trailerKey != null && trailerKey.isNotEmpty()) {
+                    _movieTrailers.value = _movieTrailers.value + (movieId to trailerKey)
+                } else {
+                    val foundId = searchYouTubeVideoId("$movieTitle official trailer")
+                    _movieTrailers.value = _movieTrailers.value + (movieId to (foundId ?: ""))
+                }
             } catch (e: Exception) {
                 Log.e("KollyGameVM", "Failed to fetch trailer for $movieTitle", e)
-                _movieTrailers.value = _movieTrailers.value + (movieId to "search:$movieTitle official trailer")
+                val foundId = searchYouTubeVideoId("$movieTitle official trailer")
+                _movieTrailers.value = _movieTrailers.value + (movieId to (foundId ?: ""))
             }
         }
     }
