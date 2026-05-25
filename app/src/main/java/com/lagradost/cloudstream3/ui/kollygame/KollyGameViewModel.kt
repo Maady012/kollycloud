@@ -1,0 +1,457 @@
+package com.lagradost.cloudstream3.ui.kollygame
+
+import android.content.Context
+import android.util.Log
+import androidx.lifecycle.ViewModel
+import androidx.lifecycle.viewModelScope
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.async
+import kotlinx.coroutines.coroutineScope
+import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.StateFlow
+import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
+import org.json.JSONObject
+import java.net.URL
+import java.text.SimpleDateFormat
+import java.util.Date
+import java.util.Locale
+
+sealed interface KollywoodUiState {
+    object Loading : KollywoodUiState
+    data class Success(
+        val trending: List<TmdbMovie>,
+        val topRated: List<TmdbMovie>,
+        val upcoming: List<TmdbMovie>,
+        val isDemoMode: Boolean
+    ) : KollywoodUiState
+    data class Error(
+        val message: String,
+        val fallbackTrending: List<TmdbMovie>? = null,
+        val fallbackTopRated: List<TmdbMovie>? = null,
+        val fallbackUpcoming: List<TmdbMovie>? = null
+    ) : KollywoodUiState
+}
+
+class KollyGameViewModel : ViewModel() {
+
+    private val _kollywoodState = MutableStateFlow<KollywoodUiState>(KollywoodUiState.Loading)
+    val kollywoodState: StateFlow<KollywoodUiState> = _kollywoodState.asStateFlow()
+
+    private val _isRefreshing = MutableStateFlow(false)
+    val isRefreshing: StateFlow<Boolean> = _isRefreshing.asStateFlow()
+
+    private val curatedTrailers = mapOf(
+        991101L to "h8o0x8i_m2U", // Amaran
+        991102L to "Po3jJhY-NBM", // Leo
+        991103L to "lhI6o3W4iPE", // GOAT
+        991201L to "OInr36v65v8", // Nayagan
+        991202L to "6b-3VccHe-Y", // Anbe Sivam
+        991203L to "Gc6d_No5_P0", // Jai Bhim
+        991001L to "lhI6o3W4iPE", // Thalapathy 69
+        991002L to "2Hcln39R7I0", // Vidaamuyarchi
+        991003L to "5bSsn6H_8Xk", // Coolie
+        991004L to "r9vWfX_7KzU", // Kanguva 2
+        991005L to "t2zG260WvV0", // Good Bad Ugly
+        991006L to "0h2g-a0C_x4", // Vettaiyan
+        991007L to "pTAsf2y8E7I"  // Love Insurance Kompaney
+    )
+
+    private val _movieTrailers = MutableStateFlow<Map<Long, String>>(curatedTrailers)
+    val movieTrailers: StateFlow<Map<Long, String>> = _movieTrailers.asStateFlow()
+
+    private val _movieCredits = MutableStateFlow<Map<Long, TmdbCreditsResponse>>(emptyMap())
+    val movieCredits: StateFlow<Map<Long, TmdbCreditsResponse>> = _movieCredits.asStateFlow()
+
+    private val _creditsLoading = MutableStateFlow<Boolean>(false)
+    val creditsLoading: StateFlow<Boolean> = _creditsLoading.asStateFlow()
+
+    private val _personLoading = MutableStateFlow<Boolean>(false)
+    val personLoading: StateFlow<Boolean> = _personLoading.asStateFlow()
+
+    private val _selectedPerson = MutableStateFlow<TmdbPersonResponse?>(null)
+    val selectedPerson: StateFlow<TmdbPersonResponse?> = _selectedPerson.asStateFlow()
+
+    private val _selectedPersonCredits = MutableStateFlow<TmdbPersonMovieCreditsResponse?>(null)
+    val selectedPersonCredits: StateFlow<TmdbPersonMovieCreditsResponse?> = _selectedPersonCredits.asStateFlow()
+
+    private fun getTmdbKey(ctx: Context): String {
+        val prefs = ctx.getSharedPreferences("kolly_gaming_secure_prefs", Context.MODE_PRIVATE)
+        val saved = prefs.getString("tmdb_api_key_secure", "") ?: ""
+        return saved.ifBlank { "6a466e5332dd8e436b7925a5c9f02ad2" }
+    }
+
+    fun fetchKollywoodMovies(ctx: Context) {
+        viewModelScope.launch {
+            val currentState = _kollywoodState.value
+            val hasData = currentState is KollywoodUiState.Success || 
+                          (currentState is KollywoodUiState.Error && currentState.fallbackTrending != null)
+            
+            if (!hasData) {
+                _kollywoodState.value = KollywoodUiState.Loading
+            } else {
+                _isRefreshing.value = true
+            }
+
+            try {
+                val apiKey = getTmdbKey(ctx)
+                if (apiKey.isBlank() || apiKey == "PLACEHOLDER_TMDB_KEY") {
+                    val trending = getCuratedTrendingMovies().shuffled()
+                    val topRated = getCuratedTopRatedMovies().shuffled()
+                    val upcoming = getCuratedUpcomingMovies().shuffled()
+                    _kollywoodState.value = KollywoodUiState.Success(
+                        trending = trending,
+                        topRated = topRated,
+                        upcoming = upcoming,
+                        isDemoMode = true
+                    )
+                } else {
+                    val todayDate = SimpleDateFormat("yyyy-MM-dd", Locale.getDefault()).format(Date())
+                    
+                    val results = coroutineScope {
+                        val trendingDeferred = async(Dispatchers.IO) {
+                            fetchMoviesFromApi("https://api.themoviedb.org/3/discover/movie?api_key=$apiKey&with_original_language=ta&region=IN&sort_by=popularity.desc&page=1")
+                        }
+                        val topRatedDeferred = async(Dispatchers.IO) {
+                            fetchMoviesFromApi("https://api.themoviedb.org/3/discover/movie?api_key=$apiKey&with_original_language=ta&region=IN&sort_by=vote_average.desc&vote_count.gte=8&page=1")
+                        }
+                        val upcomingDeferred = async(Dispatchers.IO) {
+                            fetchMoviesFromApi("https://api.themoviedb.org/3/discover/movie?api_key=$apiKey&with_original_language=ta&region=IN&sort_by=primary_release_date.asc&primary_release_date.gte=$todayDate&page=1")
+                        }
+
+                        listOf(
+                            trendingDeferred.await().ifEmpty { getCuratedTrendingMovies() }.shuffled(),
+                            topRatedDeferred.await().ifEmpty { getCuratedTopRatedMovies() }.shuffled(),
+                            upcomingDeferred.await().ifEmpty { getCuratedUpcomingMovies() }.shuffled()
+                        )
+                    }
+
+                    val trending = results[0]
+                    val topRated = results[1]
+                    val upcoming = results[2]
+
+                    saveCachedJson(ctx, "trending", trending)
+                    saveCachedJson(ctx, "top_rated", topRated)
+                    saveCachedJson(ctx, "upcoming", upcoming)
+
+                    _kollywoodState.value = KollywoodUiState.Success(
+                        trending = trending,
+                        topRated = topRated,
+                        upcoming = upcoming,
+                        isDemoMode = false
+                    )
+                }
+            } catch (e: Exception) {
+                Log.e("KollyGameVM", "TMDB API request failed, loading local secure cache fallback", e)
+                val cacheTrending = (getCachedMovies(ctx, "trending") ?: getCuratedTrendingMovies()).shuffled()
+                val cacheTopRated = (getCachedMovies(ctx, "top_rated") ?: getCuratedTopRatedMovies()).shuffled()
+                val cacheUpcoming = (getCachedMovies(ctx, "upcoming") ?: getCuratedUpcomingMovies()).shuffled()
+                
+                _kollywoodState.value = KollywoodUiState.Error(
+                    message = e.localizedMessage ?: "Failed to connect to TMDB database.",
+                    fallbackTrending = cacheTrending,
+                    fallbackTopRated = cacheTopRated,
+                    fallbackUpcoming = cacheUpcoming
+                )
+            } finally {
+                _isRefreshing.value = false
+            }
+        }
+    }
+
+    fun fetchMovieTrailer(ctx: Context, movieId: Long, movieTitle: String) {
+        if (_movieTrailers.value.containsKey(movieId) && _movieTrailers.value[movieId]?.startsWith("search:") == false) {
+            return
+        }
+
+        viewModelScope.launch {
+            try {
+                if (curatedTrailers.containsKey(movieId)) {
+                    val key = curatedTrailers[movieId]!!
+                    _movieTrailers.value = _movieTrailers.value + (movieId to key)
+                    return@launch
+                }
+
+                val apiKey = getTmdbKey(ctx)
+                val url = "https://api.themoviedb.org/3/movie/$movieId/videos?api_key=$apiKey&language=en-US"
+                val json = withContext(Dispatchers.IO) { URL(url).openStream().bufferedReader().readText() }
+                val root = JSONObject(json)
+                val results = root.optJSONArray("results")
+                var trailerKey: String? = null
+                if (results != null) {
+                    for (i in 0 until results.length()) {
+                        val obj = results.getJSONObject(i)
+                        val site = obj.optString("site")
+                        val type = obj.optString("type")
+                        if (site.equals("YouTube", ignoreCase = true) && type.equals("Trailer", ignoreCase = true)) {
+                            trailerKey = obj.optString("key")
+                            break
+                        }
+                    }
+                }
+
+                val finalKey = trailerKey ?: "search:$movieTitle official trailer"
+                _movieTrailers.value = _movieTrailers.value + (movieId to finalKey)
+            } catch (e: Exception) {
+                Log.e("KollyGameVM", "Failed to fetch trailer for $movieTitle", e)
+                _movieTrailers.value = _movieTrailers.value + (movieId to "search:$movieTitle official trailer")
+            }
+        }
+    }
+
+    fun fetchMovieCredits(ctx: Context, movieId: Long) {
+        if (_movieCredits.value.containsKey(movieId)) return
+
+        viewModelScope.launch {
+            _creditsLoading.value = true
+            try {
+                val apiKey = getTmdbKey(ctx)
+                val url = "https://api.themoviedb.org/3/movie/$movieId/credits?api_key=$apiKey"
+                val json = withContext(Dispatchers.IO) { URL(url).openStream().bufferedReader().readText() }
+                val response = TmdbCreditsResponse.fromJson(JSONObject(json))
+                _movieCredits.value = _movieCredits.value + (movieId to response)
+            } catch (e: Exception) {
+                Log.e("KollyGameVM", "Failed to load credits for $movieId", e)
+            } finally {
+                _creditsLoading.value = false
+            }
+        }
+    }
+
+    fun fetchPersonDetails(ctx: Context, personId: Long) {
+        viewModelScope.launch {
+            _personLoading.value = true
+            try {
+                val apiKey = getTmdbKey(ctx)
+                
+                val detailsDeferred = async(Dispatchers.IO) {
+                    val url = "https://api.themoviedb.org/3/person/$personId?api_key=$apiKey"
+                    URL(url).openStream().bufferedReader().readText()
+                }
+
+                val creditsDeferred = async(Dispatchers.IO) {
+                    val url = "https://api.themoviedb.org/3/person/$personId/movie_credits?api_key=$apiKey"
+                    URL(url).openStream().bufferedReader().readText()
+                }
+
+                val detailsJson = detailsDeferred.await()
+                val creditsJson = creditsDeferred.await()
+
+                _selectedPerson.value = TmdbPersonResponse.fromJson(JSONObject(detailsJson))
+                _selectedPersonCredits.value = TmdbPersonMovieCreditsResponse.fromJson(JSONObject(creditsJson))
+            } catch (e: Exception) {
+                Log.e("KollyGameVM", "Failed to load person details for $personId", e)
+            } finally {
+                _personLoading.value = false
+            }
+        }
+    }
+
+    fun clearSelectedPerson() {
+        _selectedPerson.value = null
+        _selectedPersonCredits.value = null
+    }
+
+    private fun fetchMoviesFromApi(urlString: String): List<TmdbMovie> {
+        return try {
+            val json = URL(urlString).openStream().bufferedReader().readText()
+            val root = JSONObject(json)
+            val results = root.optJSONArray("results")
+            val list = mutableListOf<TmdbMovie>()
+            if (results != null) {
+                for (i in 0 until results.length()) {
+                    list.add(TmdbMovie.fromJson(results.getJSONObject(i)))
+                }
+            }
+            list
+        } catch (e: Exception) {
+            Log.e("KollyGameVM", "API fetch error: $urlString", e)
+            emptyList()
+        }
+    }
+
+    private fun saveCachedJson(ctx: Context, key: String, movies: List<TmdbMovie>) {
+        try {
+            val prefs = ctx.getSharedPreferences("kolly_gaming_secure_prefs", Context.MODE_PRIVATE)
+            val jsonArr = org.json.JSONArray()
+            movies.forEach { movie ->
+                val obj = JSONObject().apply {
+                    put("id", movie.id)
+                    put("title", movie.title)
+                    put("original_title", movie.originalTitle)
+                    put("overview", movie.overview)
+                    put("poster_path", movie.posterPath)
+                    put("backdrop_path", movie.backdropPath)
+                    put("release_date", movie.releaseDate)
+                    put("vote_average", movie.voteAverage)
+                }
+                jsonArr.put(obj)
+            }
+            prefs.edit().putString("cache_movies_$key", jsonArr.toString()).apply()
+        } catch (e: Exception) {
+            Log.e("KollyGameVM", "Failed to cache movies", e)
+        }
+    }
+
+    private fun getCachedMovies(ctx: Context, key: String): List<TmdbMovie>? {
+        return try {
+            val prefs = ctx.getSharedPreferences("kolly_gaming_secure_prefs", Context.MODE_PRIVATE)
+            val jsonStr = prefs.getString("cache_movies_$key", null) ?: return null
+            val jsonArr = org.json.JSONArray(jsonStr)
+            val list = mutableListOf<TmdbMovie>()
+            for (i in 0 until jsonArr.length()) {
+                list.add(TmdbMovie.fromJson(jsonArr.getJSONObject(i)))
+            }
+            list
+        } catch (e: Exception) {
+            Log.e("KollyGameVM", "Failed to read cached movies", e)
+            null
+        }
+    }
+
+    private fun getCuratedTrendingMovies(): List<TmdbMovie> {
+        return listOf(
+            TmdbMovie(
+                id = 991101,
+                title = "Amaran",
+                originalTitle = "அமரன்",
+                overview = "The inspiring true story of Major Mukund Varadarajan, capturing his deep valor and relentless defense missions under extreme risk.",
+                posterPath = "https://images.unsplash.com/photo-1509198397868-475647b2a1e5?w=500&auto=format&fit=crop&q=80",
+                backdropPath = "https://images.unsplash.com/photo-1509198397868-475647b2a1e5?w=1200&auto=format&fit=crop&q=80",
+                releaseDate = "2024-10-31",
+                voteAverage = 8.8
+            ),
+            TmdbMovie(
+                id = 991102,
+                title = "Leo",
+                originalTitle = "லியோ",
+                overview = "A mild-mannered cafe owner becomes the target of a drug cartel, who suspect him of being a former associate with a dark past.",
+                posterPath = "https://images.unsplash.com/photo-1536440136628-849c177e76a1?w=500&auto=format&fit=crop&q=80",
+                backdropPath = "https://images.unsplash.com/photo-1536440136628-849c177e76a1?w=1200&auto=format&fit=crop&q=80",
+                releaseDate = "2023-10-19",
+                voteAverage = 8.2
+            ),
+            TmdbMovie(
+                id = 991103,
+                title = "The Greatest Of All Time",
+                originalTitle = "கோட்",
+                overview = "A top-tier field agent and hostage negotiator faces a ghost from his past that threatens the entire security ecosystem of the nation.",
+                posterPath = null,
+                backdropPath = null,
+                releaseDate = "2024-09-05",
+                voteAverage = 7.5
+            )
+        )
+    }
+
+    private fun getCuratedTopRatedMovies(): List<TmdbMovie> {
+        return listOf(
+            TmdbMovie(
+                id = 991201,
+                title = "Nayagan",
+                originalTitle = "நாயகн",
+                overview = "A small boy witnesses his father's murder, flees to Bombay, and rises to become a powerful, beloved underworld don protecting the needy.",
+                posterPath = "https://images.unsplash.com/photo-1489599849927-2ee91cede3ba?w=500&auto=format&fit=crop&q=80",
+                backdropPath = "https://images.unsplash.com/photo-1489599849927-2ee91cede3ba?w=1200&auto=format&fit=crop&q=80",
+                releaseDate = "1987-10-21",
+                voteAverage = 9.5
+            ),
+            TmdbMovie(
+                id = 991202,
+                title = "Anbe Sivam",
+                originalTitle = "அன்பே சிவம்",
+                overview = "Two men with contrasting personalities embark on an unexpected journey from Bhubaneswar to Chennai, finding love, humanity, and faith.",
+                posterPath = "https://images.unsplash.com/photo-1518709268805-4e9042af9f23?w=500&auto=format&fit=crop&q=80",
+                backdropPath = "https://images.unsplash.com/photo-1518709268805-4e9042af9f23?w=1200&auto=format&fit=crop&q=80",
+                releaseDate = "2003-01-15",
+                voteAverage = 9.1
+            ),
+            TmdbMovie(
+                id = 991203,
+                title = "Jai Bhim",
+                originalTitle = "ஜெய் பீம்",
+                overview = "A courageous lawyer fights relentlessly for justice when an innocent tribal man is falsely accused and disappears from police custody.",
+                posterPath = null,
+                backdropPath = null,
+                releaseDate = "2021-11-02",
+                voteAverage = 9.4
+            )
+        )
+    }
+
+    private fun getCuratedUpcomingMovies(): List<TmdbMovie> {
+        return listOf(
+            TmdbMovie(
+                id = 991001,
+                title = "Thalapathy 69",
+                originalTitle = "தளபதி 69",
+                overview = "The monumental final cinematic outing of actor Vijay directed by H. Vinoth, capturing a highly dramatic narrative expected to set box office records.",
+                posterPath = "https://images.unsplash.com/photo-1536440136628-849c177e76a1?w=500&auto=format&fit=crop&q=80",
+                backdropPath = "https://images.unsplash.com/photo-1536440136628-849c177e76a1?w=1200&auto=format&fit=crop&q=80",
+                releaseDate = "2025-10-16",
+                voteAverage = 9.8
+            ),
+            TmdbMovie(
+                id = 991002,
+                title = "Vidaamuyarchi",
+                originalTitle = "விடாமுயற்சி",
+                overview = "An action-thriller directed by Magizh Thirumeni featuring Ajith Kumar. The narrative scales heavy personal risk, mystery, and massive action sequences.",
+                posterPath = "https://images.unsplash.com/photo-1509198397868-475647b2a1e5?w=500&auto=format&fit=crop&q=80",
+                backdropPath = "https://images.unsplash.com/photo-1509198397868-475647b2a1e5?w=1200&auto=format&fit=crop&q=80",
+                releaseDate = "2025-06-20",
+                voteAverage = 8.9
+            ),
+            TmdbMovie(
+                id = 991003,
+                title = "Coolie",
+                originalTitle = "கூலி",
+                overview = "Superstar Rajinikanth collaborates with Lokesh Kanagaraj for a vintage action gold smuggling narrative set across industrial shipyards and dense city channels.",
+                posterPath = "https://images.unsplash.com/photo-1489599849927-2ee91cede3ba?w=500&auto=format&fit=crop&q=80",
+                backdropPath = "https://images.unsplash.com/photo-1489599849927-2ee91cede3ba?w=1200&auto=format&fit=crop&q=80",
+                releaseDate = "2025-09-12",
+                voteAverage = 9.3
+            ),
+            TmdbMovie(
+                id = 991004,
+                title = "Kanguva: Part II",
+                originalTitle = "கங்குவா 2",
+                overview = "The epic conclusion of Kanguva, expanding Suriya's historical struggle through centuries to resolve an ancient obligation with a modern resolution.",
+                posterPath = "https://images.unsplash.com/photo-1518709268805-4e9042af9f23?w=500&auto=format&fit=crop&q=80",
+                backdropPath = "https://images.unsplash.com/photo-1518709268805-4e9042af9f23?w=1200&auto=format&fit=crop&q=80",
+                releaseDate = "2026-04-18",
+                voteAverage = 7.7
+            ),
+            TmdbMovie(
+                id = 991005,
+                title = "Good Bad Ugly",
+                originalTitle = "குட் பேட் அக்லி",
+                overview = "Adhik Ravichandran directs Ajith Kumar in a dynamic neo-noir entertainer with eccentric characters, heavy music scores, and a stylized crime underground.",
+                posterPath = "https://images.unsplash.com/photo-1533928298208-27ff66555d8d?w=500&auto=format&fit=crop&q=80",
+                backdropPath = "https://images.unsplash.com/photo-1533928298208-27ff66555d8d?w=1200&auto=format&fit=crop&q=80",
+                releaseDate = "2025-05-29",
+                voteAverage = 8.5
+            ),
+            TmdbMovie(
+                id = 991006,
+                title = "Vettaiyan: The Precursor",
+                originalTitle = "வேட்டையன்",
+                overview = "An investigative thriller exploring the history of human encounter specialization and structural reform in the judicial departments.",
+                posterPath = "https://images.unsplash.com/photo-1478760329108-5c3ed9d495a0?w=500&auto=format&fit=crop&q=80",
+                backdropPath = "https://images.unsplash.com/photo-1478760329108-5c3ed9d495a0?w=1200&auto=format&fit=crop&q=80",
+                releaseDate = "2025-02-14",
+                voteAverage = 8.2
+            ),
+            TmdbMovie(
+                id = 991007,
+                title = "Love Insurance Kompaney",
+                originalTitle = "லவ் இன்சூரன்ஸ் கம்பெனி",
+                overview = "Vignesh Shivan directs a quirky futuristic comedy centered around a company that sells insurance packages guaranteeing relationship success and emotional protection.",
+                posterPath = "https://images.unsplash.com/photo-1512428559087-560fa5ceab42?w=500&auto=format&fit=crop&q=80",
+                backdropPath = "https://images.unsplash.com/photo-1512428559087-560fa5ceab42?w=1200&auto=format&fit=crop&q=80",
+                releaseDate = "2025-07-11",
+                voteAverage = 8.0
+            )
+        )
+    }
+}

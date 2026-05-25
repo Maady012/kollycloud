@@ -8,6 +8,7 @@ import org.jetbrains.kotlin.gradle.tasks.KotlinJvmCompile
 plugins {
     alias(libs.plugins.android.application)
     alias(libs.plugins.dokka)
+    id("org.jetbrains.kotlin.plugin.compose") version libs.versions.kotlinGradlePlugin.get()
 }
 
 val javaTarget = JvmTarget.fromTarget(libs.versions.jvmTarget.get())
@@ -188,6 +189,7 @@ android {
     buildFeatures {
         buildConfig = true
         viewBinding = true
+        compose = true
     }
 
     packaging {
@@ -270,6 +272,15 @@ dependencies {
     implementation(libs.nicehttp) // HTTP Lib
 
     implementation(project(":library"))
+
+    // Jetpack Compose for KollyGame screen
+    val composeBom = platform("androidx.compose:compose-bom:2024.09.00")
+    implementation(composeBom)
+    implementation("androidx.compose.ui:ui")
+    implementation("androidx.compose.ui:ui-tooling-preview")
+    implementation("androidx.compose.material3:material3")
+    implementation("androidx.activity:activity-compose:1.9.3")
+    implementation("io.coil-kt.coil3:coil-compose:${libs.versions.coil.get()}")
 }
 
 tasks.register<Jar>("androidSourcesJar") {
