@@ -173,6 +173,36 @@ class SettingsGeneral : BasePreferenceFragmentCompat() {
         pickDownloadPath(uri, path)
     }
 
+    private val backupFolderPicker = getChooseFolderLauncher { uri, path ->
+        if (uri != null) {
+            val context = context ?: return@getChooseFolderLauncher
+            try {
+                val takeFlags = android.content.Intent.FLAG_GRANT_READ_URI_PERMISSION or android.content.Intent.FLAG_GRANT_WRITE_URI_PERMISSION
+                context.contentResolver.takePersistableUriPermission(uri, takeFlags)
+            } catch (e: Exception) {
+                logError(e)
+            }
+            PreferenceManager.getDefaultSharedPreferences(context).edit {
+                putString("backup_google_drive_folder", uri.toString())
+            }
+            com.lagradost.cloudstream3.ui.kollygame.KollyBackupWorker.schedule(context)
+            CommonActivity.showToast("Backup folder linked successfully!", Toast.LENGTH_SHORT)
+            findPreference<androidx.preference.Preference>("backup_google_drive_folder")?.summary = uri.toString()
+        }
+    }
+
+    private val restoreFilePicker = registerForActivityResult(androidx.activity.result.contract.ActivityResultContracts.OpenDocument()) { uri ->
+        if (uri != null) {
+            val context = context ?: return@registerForActivityResult
+            val success = com.lagradost.cloudstream3.ui.kollygame.KollyBackupWorker.runRestore(context, uri)
+            if (success) {
+                CommonActivity.showToast("Watchlist and Watched lists restored successfully!", Toast.LENGTH_LONG)
+            } else {
+                CommonActivity.showToast("Failed to restore backup. Invalid file format.", Toast.LENGTH_LONG)
+            }
+        }
+    }
+
     override fun onCreatePreferences(savedInstanceState: Bundle?, rootKey: String?) {
         hideKeyboard()
         setPreferencesFromResource(R.xml.settings_general, rootKey)
@@ -427,7 +457,53 @@ class SettingsGeneral : BasePreferenceFragmentCompat() {
                     }
 
                     return@setOnPreferenceClickListener true
+            }
+        }
+    } catch (e: Exception) {
+        e.printStackTrace()
+    }
+
+        try {
+            val folderUri = settingsManager.getString("backup_google_drive_folder", null)
+            findPreference<androidx.preference.Preference>("backup_google_drive_folder")?.apply {
+                if (!folderUri.isNullOrBlank()) {
+                    summary = folderUri
                 }
+                setOnPreferenceClickListener {
+                    try {
+                        backupFolderPicker.launch(Uri.EMPTY)
+                    } catch (e: Exception) {
+                        logError(e)
+                    }
+                    true
+                }
+            }
+
+            findPreference<androidx.preference.Preference>("backup_auto_daily")?.setOnPreferenceChangeListener { _, newValue ->
+                settingsManager.edit {
+                    putBoolean("backup_auto_daily", newValue as Boolean)
+                }
+                com.lagradost.cloudstream3.ui.kollygame.KollyBackupWorker.schedule(requireContext())
+                true
+            }
+
+            findPreference<androidx.preference.Preference>("backup_now_pref")?.setOnPreferenceClickListener {
+                val success = com.lagradost.cloudstream3.ui.kollygame.KollyBackupWorker.runBackupImmediately(requireContext())
+                if (success) {
+                    CommonActivity.showToast("Backup created successfully on Google Drive!", Toast.LENGTH_LONG)
+                } else {
+                    CommonActivity.showToast("Backup failed. Please make sure a backup folder is linked.", Toast.LENGTH_LONG)
+                }
+                true
+            }
+
+            findPreference<androidx.preference.Preference>("restore_backup_pref")?.setOnPreferenceClickListener {
+                try {
+                    restoreFilePicker.launch(arrayOf("application/json", "application/octet-stream"))
+                } catch (e: Exception) {
+                    logError(e)
+                }
+                true
             }
         } catch (e: Exception) {
             e.printStackTrace()

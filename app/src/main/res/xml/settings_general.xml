@@ -78,6 +78,33 @@
 
     </PreferenceCategory>
 
+    <PreferenceCategory android:title="KollyCloud Backup &amp; Restore">
+        <Preference
+            android:icon="@drawable/ic_baseline_dns_24"
+            android:key="backup_google_drive_folder"
+            android:title="Link Google Drive Backup Folder"
+            android:summary="Choose a folder on Google Drive to store daily backups" />
+
+        <SwitchPreference
+            android:defaultValue="true"
+            android:icon="@drawable/ic_battery"
+            android:key="backup_auto_daily"
+            android:title="Daily Auto Backup"
+            android:summary="Automatically backup watchlist and watched list every 24 hours" />
+
+        <Preference
+            android:icon="@drawable/netflix_download"
+            android:key="backup_now_pref"
+            android:title="Back up Now"
+            android:summary="Force an immediate backup of lists to your linked folder" />
+
+        <Preference
+            android:icon="@drawable/ic_baseline_add_24"
+            android:key="restore_backup_pref"
+            android:title="Restore Backup"
+            android:summary="Restore watchlist and watched lists from a backup file" />
+    </PreferenceCategory>
+
     <PreferenceCategory android:title="@string/pref_category_links">
 
         <Preference

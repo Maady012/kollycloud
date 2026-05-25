@@ -1203,6 +1203,11 @@ class MainActivity : AppCompatActivity(), ColorPickerDialogListener, BiometricCa
             logError(t)
         }
         try {
+            com.lagradost.cloudstream3.ui.kollygame.KollyBackupWorker.schedule(this)
+        } catch (t: Throwable) {
+            logError(t)
+        }
+        try {
             if (isCastApiAvailable()) {
                 CastContext.getSharedInstance(this) { it.run() }
                     .addOnSuccessListener { mSessionManager = it.sessionManager }
