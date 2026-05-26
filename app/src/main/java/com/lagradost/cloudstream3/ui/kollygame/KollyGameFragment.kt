@@ -20,7 +20,11 @@ import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
+import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.LazyRow
+import androidx.compose.foundation.lazy.grid.GridCells
+import androidx.compose.foundation.lazy.grid.LazyVerticalGrid
+import androidx.compose.foundation.lazy.grid.items
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
@@ -45,10 +49,12 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.compose.ui.viewinterop.AndroidView
+import androidx.compose.ui.window.Dialog
 import androidx.fragment.app.Fragment
 import androidx.fragment.app.activityViewModels
 import coil3.compose.AsyncImage
 import com.lagradost.cloudstream3.MainActivity
+import java.util.Calendar
 import java.util.Locale
 
 class KollyGameFragment : Fragment() {
@@ -70,9 +76,7 @@ class KollyGameFragment : Fragment() {
                             " " + movie.releaseDate.substring(0, 4)
                         } else ""
                         MainActivity.nextSearchQuery = "${movie.title}$year"
-                        activity?.findViewById<com.google.android.material.bottomnavigation.BottomNavigationView>(
-                            com.lagradost.cloudstream3.R.id.nav_view
-                        )?.selectedItemId = com.lagradost.cloudstream3.R.id.navigation_search
+                        (activity as? MainActivity)?.navController?.navigate(com.lagradost.cloudstream3.R.id.navigation_search)
                     }
                 )
             }
@@ -86,51 +90,61 @@ class KollyGameFragment : Fragment() {
 }
 
 @Composable
-fun FilterChipRow(
+fun SearchableDropdown( 
     title: String,
     items: List<String>,
     selectedItem: String,
     onItemSelected: (String) -> Unit
 ) {
-    Row(
-        modifier = Modifier
-            .fillMaxWidth()
-            .padding(vertical = 4.dp),
-        verticalAlignment = Alignment.CenterVertically
-    ) {
-        Text(
-            text = title,
-            color = Color.Gray,
-            fontSize = 11.sp,
-            fontWeight = FontWeight.Bold,
-            modifier = Modifier
-                .width(55.dp)
-                .padding(start = 16.dp)
-        )
-        LazyRow(
-            contentPadding = PaddingValues(horizontal = 12.dp),
-            horizontalArrangement = Arrangement.spacedBy(8.dp)
+    var expanded by remember { mutableStateOf(false) }
+    var searchText by remember { mutableStateOf("") }
+
+    Box(modifier = Modifier.padding(vertical = 4.dp)) {
+        TextButton(
+            onClick = { expanded = true }, 
+            modifier = Modifier.fillMaxWidth(),
+            shape = RoundedCornerShape(8.dp),
+            colors = ButtonDefaults.textButtonColors(contentColor = Color.White)
         ) {
-            items(items) { item ->
-                val isSelected = item == selectedItem
-                Box(
-                    modifier = Modifier
-                        .clip(RoundedCornerShape(8.dp))
-                        .background(if (isSelected) Color(0xFFFFD700) else Color(0xFF1E1E2C))
-                        .border(
-                            width = 1.dp,
-                            color = if (isSelected) Color(0xFFFFD700) else Color.Gray.copy(alpha = 0.2f),
-                            shape = RoundedCornerShape(8.dp)
-                        )
-                        .clickable { onItemSelected(item) }
-                        .padding(horizontal = 10.dp, vertical = 5.dp)
+            Text(text = "$title: $selectedItem", fontWeight = FontWeight.Bold)
+            Spacer(modifier = Modifier.weight(1f))
+            Icon(Icons.Default.ArrowDropDown, contentDescription = null)
+        }
+
+        if (expanded) {
+            Dialog(onDismissRequest = { expanded = false }) {
+                Surface(
+                    shape = RoundedCornerShape(12.dp),
+                    color = Color(0xFF1E1E2C),
+                    contentColor = Color.White,
+                    border = BorderStroke(1.dp, Color(0xFFFFD700))
                 ) {
-                    Text(
-                        text = item,
-                        color = if (isSelected) Color.Black else Color.White,
-                        fontSize = 11.sp,
-                        fontWeight = if (isSelected) FontWeight.Bold else FontWeight.Normal
-                    )
+                    Column(modifier = Modifier.padding(16.dp)) {
+                        Text(title, fontSize = 20.sp, fontWeight = FontWeight.Bold)
+                        Spacer(modifier = Modifier.height(8.dp))
+                        OutlinedTextField(
+                            value = searchText,
+                            onValueChange = { searchText = it },
+                            placeholder = { Text("Search...") },
+                            modifier = Modifier.fillMaxWidth()
+                        )
+                        Spacer(modifier = Modifier.height(8.dp))
+                        val filteredItems = items.filter { it.contains(searchText, ignoreCase = true) }
+                        LazyColumn {
+                            items(filteredItems) { item ->
+                                Text(
+                                    text = item,
+                                    modifier = Modifier
+                                        .fillMaxWidth()
+                                        .clickable { 
+                                            onItemSelected(item)
+                                            expanded = false
+                                        }
+                                        .padding(vertical = 12.dp)
+                                )
+                            }
+                        }
+                    }
                 }
             }
         }
@@ -144,7 +158,6 @@ fun KollywoodScreen(
     onPlayMovieClick: (TmdbMovie) -> Unit
 ) {
     val uiState by viewModel.kollywoodState.collectAsState()
-    val isRefreshing by viewModel.isRefreshing.collectAsState()
     var selectedMovie by remember { mutableStateOf<TmdbMovie?>(null) }
     var showWatchlistOverlay by remember { mutableStateOf(false) }
     var showWatchedOverlay by remember { mutableStateOf(false) }
@@ -154,6 +167,7 @@ fun KollywoodScreen(
     val context = LocalContext.current
 
     val searchQuery by viewModel.searchQuery.collectAsState()
+    val actorQuery by viewModel.actorQuery.collectAsState()
     val selectedGenre by viewModel.selectedGenre.collectAsState()
     val selectedYear by viewModel.selectedYear.collectAsState()
     val selectedRating by viewModel.selectedRating.collectAsState()
@@ -161,9 +175,11 @@ fun KollywoodScreen(
 
     val isSearching by viewModel.isSearching.collectAsState()
     val searchResultMovies by viewModel.searchResultMovies.collectAsState()
+    val isLoadingMore by viewModel.isLoadingMore.collectAsState()
 
     val langMap = remember { mapOf("Tamil" to "ta", "Telugu" to "te", "Malayalam" to "ml", "Hindi" to "hi", "English" to "en") }
     val reverseLangMap = remember { mapOf("ta" to "Tamil", "te" to "Telugu", "ml" to "Malayalam", "hi" to "Hindi", "en" to "English") }
+    val years = remember { (Calendar.getInstance().get(Calendar.YEAR) downTo 1950).map { it.toString() } }
 
     Box(
         modifier = Modifier
@@ -171,596 +187,157 @@ fun KollywoodScreen(
             .background(Color(0xFF0F0F13))
     ) {
         Column(modifier = Modifier.fillMaxSize()) {
-            // Header Spotlights
-            Box(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .background(
-                        Brush.horizontalGradient(
-                            listOf(Color(0xFF1E0B36), Color(0xFF0B1436))
-                        )
-                    )
-                    .statusBarsPadding()
-                    .padding(horizontal = 20.dp, vertical = 14.dp)
+            // Header
+             Row(
+                modifier = Modifier.fillMaxWidth().background(Color(0xFF1A1A2A)).statusBarsPadding().padding(horizontal = 16.dp, vertical = 8.dp),
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.SpaceBetween
             ) {
-                Row(
-                    modifier = Modifier.fillMaxWidth(),
-                    verticalAlignment = Alignment.CenterVertically,
-                    horizontalArrangement = Arrangement.SpaceBetween
-                ) {
-                    Text(
-                        text = "🎬 KollyCloud Spotlight",
-                        color = Color(0xFFFFD700),
-                        fontSize = 20.sp,
-                        fontWeight = FontWeight.Black
-                    )
-                    Row(verticalAlignment = Alignment.CenterVertically) {
-                        IconButton(
-                            onClick = { showWatchedOverlay = true },
-                            modifier = Modifier.size(28.dp)
-                        ) {
-                            EyeIcon(
-                                isWatched = true,
-                                modifier = Modifier.size(20.dp)
-                            )
+                 Text("KollyCloud", fontSize = 22.sp, fontWeight = FontWeight.Black, color = Color(0xFFFFD700))
+                 Row {
+                    IconButton(onClick = { showWatchedOverlay = true }) { EyeIcon(isWatched = true) }
+                    IconButton(onClick = { showWatchlistOverlay = true }) { Icon(Icons.Default.Favorite, contentDescription = "Watchlist", tint = Color(0xFFFF6B6B)) }
+                    IconButton(onClick = { viewModel.fetchKollywoodMovies(context) }) { Icon(Icons.Default.Refresh, contentDescription = "Refresh", tint = Color.White) }
+                 }
+            }
+            
+            // Search & Filters
+            Column(modifier = Modifier.padding(16.dp)) {
+                OutlinedTextField(
+                    value = searchQuery,
+                    onValueChange = { viewModel.searchQuery.value = it; viewModel.searchAndFilterMovies(context) },
+                    placeholder = { Text("Search Movies...", color = Color.Gray) },
+                    leadingIcon = { Icon(Icons.Default.Search, contentDescription = null, tint = Color(0xFFFFD700)) },
+                    modifier = Modifier.fillMaxWidth()
+                )
+                Spacer(modifier = Modifier.height(8.dp))
+                 OutlinedTextField(
+                    value = actorQuery,
+                    onValueChange = { viewModel.actorQuery.value = it; viewModel.searchAndFilterMovies(context) },
+                    placeholder = { Text("Search by Actor...", color = Color.Gray) },
+                    leadingIcon = { Icon(Icons.Default.Person, contentDescription = null, tint = Color(0xFFFFD700)) },
+                    modifier = Modifier.fillMaxWidth()
+                )
+                Spacer(modifier = Modifier.height(8.dp))
+                Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    Box(modifier = Modifier.weight(1f)) {
+                        SearchableDropdown("Genre", listOf("All", "Action", "Adventure", "Animation", "Comedy", "Crime", "Drama", "Family", "Fantasy", "History", "Horror", "Music", "Mystery", "Romance", "Sci-Fi", "Thriller"), selectedGenre) {
+                            viewModel.selectedGenre.value = it
+                            viewModel.searchAndFilterMovies(context)
                         }
-                        Spacer(modifier = Modifier.width(16.dp))
-                        IconButton(
-                            onClick = { showWatchlistOverlay = true },
-                            modifier = Modifier.size(28.dp)
-                        ) {
-                            Icon(
-                                imageVector = Icons.Default.Favorite,
-                                contentDescription = "Watchlist",
-                                tint = Color(0xFFFF6B6B)
-                            )
+                    }
+                    Box(modifier = Modifier.weight(1f)) {
+                        SearchableDropdown("Year", listOf("All") + years, selectedYear) {
+                            viewModel.selectedYear.value = it
+                            viewModel.searchAndFilterMovies(context)
                         }
-                        Spacer(modifier = Modifier.width(16.dp))
-                        IconButton(
-                            onClick = { viewModel.fetchKollywoodMovies(context) },
-                            modifier = Modifier.size(28.dp)
-                        ) {
-                            Icon(
-                                imageVector = Icons.Default.Refresh,
-                                contentDescription = "Refresh",
-                                tint = Color.White
-                            )
+                    }
+                }
+                 Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    Box(modifier = Modifier.weight(1f)) {
+                         SearchableDropdown("Rating", listOf("All", "9.0+", "8.0+", "7.0+", "6.0+", "5.0+"), selectedRating) {
+                            viewModel.selectedRating.value = it
+                            viewModel.searchAndFilterMovies(context)
+                        }
+                    }
+                    Box(modifier = Modifier.weight(1f)) {
+                        SearchableDropdown("Language", langMap.keys.toList(), reverseLangMap[selectedLanguage] ?: "Tamil") { 
+                            viewModel.selectedLanguage.value = langMap[it] ?: "ta"
+                            viewModel.searchAndFilterMovies(context)
                         }
                     }
                 }
             }
 
-            // Search Bar Input
-            OutlinedTextField(
-                value = searchQuery,
-                onValueChange = {
-                    viewModel.searchQuery.value = it
-                    viewModel.searchAndFilterMovies(context)
-                },
-                placeholder = { Text("Search Tamil, Hindi, English Movies...", color = Color.Gray, fontSize = 13.sp) },
-                leadingIcon = { Icon(imageVector = Icons.Default.Search, contentDescription = null, tint = Color(0xFFFFD700)) },
-                trailingIcon = {
-                    if (searchQuery.isNotEmpty()) {
-                        IconButton(onClick = {
-                            viewModel.searchQuery.value = ""
-                            viewModel.searchAndFilterMovies(context)
-                        }) {
-                            Icon(imageVector = Icons.Default.Clear, contentDescription = null, tint = Color.Gray)
-                        }
-                    }
-                },
-                singleLine = true,
-                shape = RoundedCornerShape(12.dp),
-                colors = OutlinedTextFieldDefaults.colors(
-                    focusedTextColor = Color.White,
-                    unfocusedTextColor = Color.White,
-                    focusedContainerColor = Color(0xFF161622),
-                    unfocusedContainerColor = Color(0xFF161622),
-                    focusedBorderColor = Color(0xFFFFD700),
-                    unfocusedBorderColor = Color.Gray.copy(alpha = 0.2f)
-                ),
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .padding(horizontal = 16.dp, vertical = 8.dp)
-            )
+            HorizontalDivider(color = Color.Gray.copy(alpha = 0.15f))
 
-            // Dynamic Advanced Chips Filter Drawer
-            Column(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .background(Color(0xFF0F0F13))
-                    .padding(bottom = 8.dp)
-            ) {
-                FilterChipRow(
-                    title = "Genre",
-                    items = listOf("All", "Action", "Adventure", "Animation", "Comedy", "Crime", "Drama", "Family", "Fantasy", "History", "Horror", "Music", "Mystery", "Romance", "Sci-Fi", "Thriller"),
-                    selectedItem = selectedGenre,
-                    onItemSelected = {
-                        viewModel.selectedGenre.value = it
-                        viewModel.searchAndFilterMovies(context)
-                    }
-                )
-                FilterChipRow(
-                    title = "Year",
-                    items = listOf("All", "2026", "2025", "2024", "2023", "2022", "2021", "2020", "2018", "2015", "2010", "2005", "2003", "2000"),
-                    selectedItem = selectedYear,
-                    onItemSelected = {
-                        viewModel.selectedYear.value = it
-                        viewModel.searchAndFilterMovies(context)
-                    }
-                )
-                FilterChipRow(
-                    title = "Rating",
-                    items = listOf("All", "8.0+", "7.0+", "6.0+", "5.0+"),
-                    selectedItem = selectedRating,
-                    onItemSelected = {
-                        viewModel.selectedRating.value = it
-                        viewModel.searchAndFilterMovies(context)
-                    }
-                )
-                FilterChipRow(
-                    title = "Lang",
-                    items = listOf("Tamil", "Telugu", "Malayalam", "Hindi", "English"),
-                    selectedItem = reverseLangMap[selectedLanguage] ?: "Tamil",
-                    onItemSelected = {
-                        val code = langMap[it] ?: "ta"
-                        viewModel.selectedLanguage.value = code
-                        viewModel.searchAndFilterMovies(context)
-                    }
-                )
-            }
-
-            // Divider
-            HorizontalDivider(color = Color.Gray.copy(alpha = 0.15f), thickness = 1.dp)
-
-            // Content Catalog
+            // Content
             if (isSearching) {
-                Column(
-                    modifier = Modifier
-                        .fillMaxSize()
-                        .verticalScroll(rememberScrollState())
+                LazyVerticalGrid(
+                    columns = GridCells.Fixed(2),
+                    contentPadding = PaddingValues(16.dp),
+                    horizontalArrangement = Arrangement.spacedBy(16.dp),
+                    verticalArrangement = Arrangement.spacedBy(16.dp)
                 ) {
-                    Row(
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .padding(horizontal = 16.dp, vertical = 12.dp),
-                        verticalAlignment = Alignment.CenterVertically,
-                        horizontalArrangement = Arrangement.SpaceBetween
-                    ) {
-                        Text(
-                            text = "🔍 Advanced Results (${searchResultMovies.size})",
-                            color = Color(0xFFFFD700),
-                            fontSize = 16.sp,
-                            fontWeight = FontWeight.Bold
+                    items(searchResultMovies) { movie ->
+                        MovieRowCard(
+                            movie = movie, 
+                            onClick = { selectedMovie = movie }, 
+                            isWatchlisted = viewModel.isInWatchlist(movie),
+                            isWatched = watchedMovies.contains(movie.id),
+                            onWatchlistToggle = { 
+                                if(viewModel.isInWatchlist(movie)) viewModel.removeFromWatchlist(context, movie) 
+                                else viewModel.addToWatchlist(context, movie) 
+                            }
                         )
-                        TextButton(
-                            onClick = {
-                                viewModel.searchQuery.value = ""
-                                viewModel.selectedGenre.value = "All"
-                                viewModel.selectedYear.value = "All"
-                                viewModel.selectedRating.value = "All"
-                                viewModel.selectedLanguage.value = "ta"
-                                viewModel.searchAndFilterMovies(context)
-                            }
-                        ) {
-                            Text("Reset", color = Color(0xFFFF6B6B), fontWeight = FontWeight.Bold, fontSize = 12.sp)
-                        }
                     }
-
-                    if (searchResultMovies.isEmpty()) {
-                        Box(
-                            modifier = Modifier
-                                .fillMaxWidth()
-                                .height(250.dp),
-                            contentAlignment = Alignment.Center
-                        ) {
-                            Column(horizontalAlignment = Alignment.CenterHorizontally) {
-                                Icon(imageVector = Icons.Default.Search, contentDescription = null, tint = Color.Gray, modifier = Modifier.size(48.dp))
-                                Spacer(modifier = Modifier.height(12.dp))
-                                Text("No movies match your filters.", color = Color.Gray, fontSize = 13.sp)
-                            }
-                        }
-                    } else {
-                        // Display search result in 2 columns and unlimited rows
-                        val chunked = searchResultMovies.chunked(2)
-                        Column(
-                            modifier = Modifier
-                                .fillMaxWidth()
-                                .padding(horizontal = 16.dp)
-                                .padding(bottom = 40.dp),
-                            verticalArrangement = Arrangement.spacedBy(16.dp)
-                        ) {
-                            chunked.forEach { pair ->
-                                Row(
-                                    modifier = Modifier.fillMaxWidth(),
-                                    horizontalArrangement = Arrangement.spacedBy(16.dp)
-                                ) {
-                                    Box(modifier = Modifier.weight(1f)) {
-                                        MovieRowCard(
-                                            movie = pair[0],
-                                            onClick = { selectedMovie = pair[0] },
-                                            modifier = Modifier.fillMaxWidth(),
-                                            isWatchlisted = viewModel.isInWatchlist(pair[0]),
-                                            isWatched = watchedMovies.contains(pair[0].id),
-                                            onWatchlistToggle = {
-                                                if (viewModel.isInWatchlist(pair[0])) {
-                                                    viewModel.removeFromWatchlist(context, pair[0])
-                                                } else {
-                                                    viewModel.addToWatchlist(context, pair[0])
-                                                }
-                                            },
-                                            onWatchedToggle = { viewModel.toggleWatchedMovie(context, pair[0]) }
-                                        )
-                                    }
-                                    Box(modifier = Modifier.weight(1f)) {
-                                        if (pair.size > 1) {
-                                            MovieRowCard(
-                                                movie = pair[1],
-                                                onClick = { selectedMovie = pair[1] },
-                                                modifier = Modifier.fillMaxWidth(),
-                                                isWatchlisted = viewModel.isInWatchlist(pair[1]),
-                                                isWatched = watchedMovies.contains(pair[1].id),
-                                                onWatchlistToggle = {
-                                                    if (viewModel.isInWatchlist(pair[1])) {
-                                                        viewModel.removeFromWatchlist(context, pair[1])
-                                                    } else {
-                                                        viewModel.addToWatchlist(context, pair[1])
-                                                    }
-                                                },
-                                                onWatchedToggle = { viewModel.toggleWatchedMovie(context, pair[1]) }
-                                            )
-                                        } else {
-                                            Spacer(modifier = Modifier.fillMaxWidth())
-                                        }
-                                    }
-                                }
-                            }
-                        }
+                    if (isLoadingMore) {
+                        item { CircularProgressIndicator(color = Color(0xFFFFD700)) }
+                        item { CircularProgressIndicator(color = Color(0xFFFFD700)) }
+                    }
+                     if (!isLoadingMore && searchResultMovies.isNotEmpty()) {
+                        item {LaunchedEffect(true) { viewModel.loadMoreMovies(context) } }
                     }
                 }
             } else {
-                when (val state = uiState) {
-                    is KollywoodUiState.Loading -> {
-                        Box(
-                            modifier = Modifier.fillMaxSize(),
-                            contentAlignment = Alignment.Center
-                        ) {
-                            CircularProgressIndicator(color = Color(0xFFFFD700))
-                        }
-                    }
-                    is KollywoodUiState.Success -> {
-                        KollywoodCatalog(
-                            viewModel = viewModel,
-                            trending = state.trending,
-                            topRated = state.topRated,
-                            upcoming = state.upcoming,
-                            isDemoMode = state.isDemoMode,
-                            errorMessage = null,
-                            onMovieClick = { selectedMovie = it },
-                            onRetryClick = { viewModel.fetchKollywoodMovies(context) }
-                        )
-                    }
+                 when (val state = uiState) {
+                    is KollywoodUiState.Loading -> Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) { CircularProgressIndicator(color = Color(0xFFFFD700)) }
+                    is KollywoodUiState.Success -> KollywoodCatalog(viewModel, state.trending, state.topRated, state.upcoming, state.isDemoMode, null, { selectedMovie = it }, { viewModel.fetchKollywoodMovies(context) })
                     is KollywoodUiState.Error -> {
                         if (state.fallbackTrending != null) {
-                            KollywoodCatalog(
-                                viewModel = viewModel,
-                                trending = state.fallbackTrending,
-                                topRated = state.fallbackTopRated ?: emptyList(),
-                                upcoming = state.fallbackUpcoming ?: emptyList(),
-                                isDemoMode = true,
-                                errorMessage = state.message,
-                                onMovieClick = { selectedMovie = it },
-                                onRetryClick = { viewModel.fetchKollywoodMovies(context) }
-                            )
+                            KollywoodCatalog(viewModel, state.fallbackTrending, state.fallbackTopRated ?: emptyList(), state.fallbackUpcoming ?: emptyList(), true, state.message, { selectedMovie = it }, { viewModel.fetchKollywoodMovies(context) })
                         } else {
-                            ErrorStateScreen(
-                                message = state.message,
-                                onRetry = { viewModel.fetchKollywoodMovies(context) }
-                            )
+                            ErrorStateScreen(state.message) { viewModel.fetchKollywoodMovies(context) }
                         }
                     }
                 }
             }
         }
 
-        AnimatedVisibility(
-            visible = showWatchlistOverlay,
-            enter = androidx.compose.animation.slideInVertically(
-                initialOffsetY = { it },
-                animationSpec = androidx.compose.animation.core.tween(durationMillis = 450, easing = androidx.compose.animation.core.EaseOutQuart)
-            ) + fadeIn(animationSpec = androidx.compose.animation.core.tween(450)),
-            exit = androidx.compose.animation.slideOutVertically(
-                targetOffsetY = { it },
-                animationSpec = androidx.compose.animation.core.tween(durationMillis = 350, easing = androidx.compose.animation.core.EaseInQuart)
-            ) + fadeOut(animationSpec = androidx.compose.animation.core.tween(350)),
-            modifier = Modifier.fillMaxSize()
-        ) {
-            Surface(
-                modifier = Modifier.fillMaxSize(),
-                color = Color(0xFF0C0C12),
-                contentColor = Color.White
-            ) {
-                Column(
-                    modifier = Modifier
-                        .fillMaxSize()
-                        .statusBarsPadding()
-                ) {
-                    // Header
-                    Row(
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .padding(horizontal = 20.dp, vertical = 14.dp),
-                        verticalAlignment = Alignment.CenterVertically,
-                        horizontalArrangement = Arrangement.SpaceBetween
-                    ) {
-                        Row(verticalAlignment = Alignment.CenterVertically) {
-                            IconButton(
-                                onClick = { showWatchlistOverlay = false },
-                                modifier = Modifier.background(Color.White.copy(alpha = 0.05f), RoundedCornerShape(20.dp))
-                            ) {
-                                Icon(
-                                    imageVector = Icons.Default.ArrowBack,
-                                    contentDescription = "Back",
-                                    tint = Color(0xFFFFD700)
-                                )
-                            }
-                            Spacer(modifier = Modifier.width(12.dp))
-                            Text(
-                                text = "📂 My Watchlist",
-                                color = Color.White,
-                                fontSize = 20.sp,
-                                fontWeight = FontWeight.Bold
-                            )
-                        }
-                    }
-
-                    if (watchlistMovies.isEmpty()) {
-                        Box(
-                            modifier = Modifier
-                                .fillMaxWidth()
-                                .weight(1f),
-                            contentAlignment = Alignment.Center
-                        ) {
-                            Column(horizontalAlignment = Alignment.CenterHorizontally) {
-                                Icon(
-                                    imageVector = Icons.Default.FavoriteBorder,
-                                    contentDescription = null,
-                                    tint = Color.Gray,
-                                    modifier = Modifier.size(64.dp)
-                                )
-                                Spacer(modifier = Modifier.height(12.dp))
-                                Text("Your watchlist is empty.", color = Color.Gray, fontSize = 14.sp)
-                            }
-                        }
-                    } else {
-                        // 2-column grid for watchlist
-                        val chunkedWatchlist = watchlistMovies.chunked(2)
-                        Column(
-                            modifier = Modifier
-                                .fillMaxWidth()
-                                .weight(1f)
-                                .verticalScroll(rememberScrollState())
-                                .padding(horizontal = 16.dp)
-                                .padding(bottom = 40.dp),
-                            verticalArrangement = Arrangement.spacedBy(16.dp)
-                        ) {
-                            chunkedWatchlist.forEach { pair ->
-                                Row(
-                                    modifier = Modifier.fillMaxWidth(),
-                                    horizontalArrangement = Arrangement.spacedBy(16.dp)
-                                ) {
-                                    Box(modifier = Modifier.weight(1f)) {
-                                        MovieRowCard(
-                                            movie = pair[0],
-                                            onClick = {
-                                                selectedMovie = pair[0]
-                                                showWatchlistOverlay = false
-                                            },
-                                            modifier = Modifier.fillMaxWidth(),
-                                            isWatchlisted = true,
-                                            isWatched = watchedMovies.contains(pair[0].id),
-                                            onWatchlistToggle = { viewModel.removeFromWatchlist(context, pair[0]) },
-                                            onWatchedToggle = { viewModel.toggleWatchedMovie(context, pair[0]) }
-                                        )
-                                    }
-                                    Box(modifier = Modifier.weight(1f)) {
-                                        if (pair.size > 1) {
-                                            MovieRowCard(
-                                                movie = pair[1],
-                                                onClick = {
-                                                    selectedMovie = pair[1]
-                                                    showWatchlistOverlay = false
-                                                },
-                                                modifier = Modifier.fillMaxWidth(),
-                                                isWatchlisted = true,
-                                                isWatched = watchedMovies.contains(pair[1].id),
-                                                onWatchlistToggle = { viewModel.removeFromWatchlist(context, pair[1]) },
-                                                onWatchedToggle = { viewModel.toggleWatchedMovie(context, pair[1]) }
-                                            )
-                                        } else {
-                                            Spacer(modifier = Modifier.fillMaxWidth())
-                                        }
-                                    }
-                                }
-                            }
-                        }
-                    }
-                }
-            }
+        AnimatedVisibility(showWatchlistOverlay, enter = fadeIn(), exit = fadeOut()) {
+            ItemOverlay(title = "My Watchlist", movies = watchlistMovies, onDismiss = { showWatchlistOverlay = false }, onMovieClick = { selectedMovie = it }, viewModel = viewModel)
+        }
+        
+        AnimatedVisibility(showWatchedOverlay, enter = fadeIn(), exit = fadeOut()) {
+            ItemOverlay(title = "Watched Movies", movies = watchedListMovies, onDismiss = { showWatchedOverlay = false }, onMovieClick = { selectedMovie = it }, viewModel = viewModel)
         }
 
-        AnimatedVisibility(
-            visible = showWatchedOverlay,
-            enter = androidx.compose.animation.slideInVertically(
-                initialOffsetY = { it },
-                animationSpec = androidx.compose.animation.core.tween(durationMillis = 450, easing = androidx.compose.animation.core.EaseOutQuart)
-            ) + fadeIn(animationSpec = androidx.compose.animation.core.tween(450)),
-            exit = androidx.compose.animation.slideOutVertically(
-                targetOffsetY = { it },
-                animationSpec = androidx.compose.animation.core.tween(durationMillis = 350, easing = androidx.compose.animation.core.EaseInQuart)
-            ) + fadeOut(animationSpec = androidx.compose.animation.core.tween(350)),
-            modifier = Modifier.fillMaxSize()
-        ) {
-            Surface(
-                modifier = Modifier.fillMaxSize(),
-                color = Color(0xFF0C0C12),
-                contentColor = Color.White
-            ) {
-                Column(
-                    modifier = Modifier
-                        .fillMaxSize()
-                        .statusBarsPadding()
-                ) {
-                    // Header
-                    Row(
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .padding(horizontal = 20.dp, vertical = 14.dp),
-                        verticalAlignment = Alignment.CenterVertically,
-                        horizontalArrangement = Arrangement.SpaceBetween
-                    ) {
-                        Row(verticalAlignment = Alignment.CenterVertically) {
-                            IconButton(
-                                onClick = { showWatchedOverlay = false },
-                                modifier = Modifier.background(Color.White.copy(alpha = 0.05f), RoundedCornerShape(20.dp))
-                            ) {
-                                Icon(
-                                    imageVector = Icons.Default.ArrowBack,
-                                    contentDescription = "Back",
-                                    tint = Color(0xFFFFD700)
-                                )
-                            }
-                            Spacer(modifier = Modifier.width(12.dp))
-                            Text(
-                                text = "🎬 Watched Movies",
-                                color = Color.White,
-                                fontSize = 20.sp,
-                                fontWeight = FontWeight.Bold
-                            )
-                        }
-                    }
-
-                    if (watchedListMovies.isEmpty()) {
-                        Box(
-                            modifier = Modifier
-                                .fillMaxWidth()
-                                .weight(1f),
-                            contentAlignment = Alignment.Center
-                        ) {
-                            Column(horizontalAlignment = Alignment.CenterHorizontally) {
-                                EyeIcon(
-                                    isWatched = false,
-                                    modifier = Modifier.size(64.dp)
-                                )
-                                Spacer(modifier = Modifier.height(12.dp))
-                                Text("Your watched list is empty.", color = Color.Gray, fontSize = 14.sp)
-                            }
-                        }
-                    } else {
-                        // 2-column grid for watched list
-                        val chunkedWatched = watchedListMovies.chunked(2)
-                        Column(
-                            modifier = Modifier
-                                .fillMaxWidth()
-                                .weight(1f)
-                                .verticalScroll(rememberScrollState())
-                                .padding(horizontal = 16.dp)
-                                .padding(bottom = 40.dp),
-                            verticalArrangement = Arrangement.spacedBy(16.dp)
-                        ) {
-                            chunkedWatched.forEach { pair ->
-                                Row(
-                                    modifier = Modifier.fillMaxWidth(),
-                                    horizontalArrangement = Arrangement.spacedBy(16.dp)
-                                ) {
-                                    Box(modifier = Modifier.weight(1f)) {
-                                        MovieRowCard(
-                                            movie = pair[0],
-                                            onClick = {
-                                                selectedMovie = pair[0]
-                                                showWatchedOverlay = false
-                                            },
-                                            modifier = Modifier.fillMaxWidth(),
-                                            isWatchlisted = viewModel.isInWatchlist(pair[0]),
-                                            isWatched = true,
-                                            onWatchlistToggle = {
-                                                if (viewModel.isInWatchlist(pair[0])) {
-                                                    viewModel.removeFromWatchlist(context, pair[0])
-                                                } else {
-                                                    viewModel.addToWatchlist(context, pair[0])
-                                                }
-                                            },
-                                            onWatchedToggle = { viewModel.toggleWatchedMovie(context, pair[0]) }
-                                        )
-                                    }
-                                    Box(modifier = Modifier.weight(1f)) {
-                                        if (pair.size > 1) {
-                                            MovieRowCard(
-                                                movie = pair[1],
-                                                onClick = {
-                                                    selectedMovie = pair[1]
-                                                    showWatchedOverlay = false
-                                                },
-                                                modifier = Modifier.fillMaxWidth(),
-                                                isWatchlisted = viewModel.isInWatchlist(pair[1]),
-                                                isWatched = true,
-                                                onWatchlistToggle = {
-                                                    if (viewModel.isInWatchlist(pair[1])) {
-                                                        viewModel.removeFromWatchlist(context, pair[1])
-                                                    } else {
-                                                        viewModel.addToWatchlist(context, pair[1])
-                                                    }
-                                                },
-                                                onWatchedToggle = { viewModel.toggleWatchedMovie(context, pair[1]) }
-                                            )
-                                        } else {
-                                            Spacer(modifier = Modifier.fillMaxWidth())
-                                        }
-                                    }
-                                }
-                            }
-                        }
-                    }
-                }
+        AnimatedVisibility(selectedMovie != null, enter = fadeIn(), exit = fadeOut()) {
+            movieToShow?.let { 
+                 MovieDetailContent(it, viewModel, { selectedMovie = null }, { selectedMovie = it }, onPlayMovieClick)
             }
         }
+    }
+}
 
-        val movieToShow = selectedMovie
-        AnimatedVisibility(
-            visible = movieToShow != null,
-            enter = androidx.compose.animation.slideInVertically(
-                initialOffsetY = { it },
-                animationSpec = androidx.compose.animation.core.tween(durationMillis = 450, easing = androidx.compose.animation.core.EaseOutQuart)
-            ) + fadeIn(animationSpec = androidx.compose.animation.core.tween(450)),
-            exit = androidx.compose.animation.slideOutVertically(
-                targetOffsetY = { it },
-                animationSpec = androidx.compose.animation.core.tween(durationMillis = 350, easing = androidx.compose.animation.core.EaseInQuart)
-            ) + fadeOut(animationSpec = androidx.compose.animation.core.tween(350)),
-            modifier = Modifier.fillMaxSize()
-        ) {
-            if (movieToShow != null) {
-                Surface(
-                    modifier = Modifier
-                        .fillMaxSize()
-                        .clickable(enabled = false) {},
-                    color = Color(0xFF0C0C12),
-                    contentColor = Color.White
-                ) {
-                    MovieDetailContent(
-                        movie = movieToShow,
-                        viewModel = viewModel,
-                        onDismiss = { selectedMovie = null },
-                        onRelatedMovieClick = {
-                            selectedMovie = it
-                            viewModel.clearSelectedPerson()
-                        },
-                        onPlayMovieClick = onPlayMovieClick
-                    )
+@Composable
+fun ItemOverlay(title: String, movies: List<TmdbMovie>, onDismiss: () -> Unit, onMovieClick: (TmdbMovie) -> Unit, viewModel: KollyGameViewModel) {
+    val context = LocalContext.current
+    Surface(color = Color(0xEE0F0F13)) {
+        Column(Modifier.fillMaxSize().statusBarsPadding()) {
+             Row(Modifier.fillMaxWidth().padding(16.dp), verticalAlignment = Alignment.CenterVertically) {
+                IconButton(onClick = onDismiss) { Icon(Icons.Default.ArrowBack, null, tint = Color(0xFFFFD700)) }
+                Spacer(Modifier.width(8.dp))
+                Text(title, fontSize = 20.sp, fontWeight = FontWeight.Bold)
+            }
+            if (movies.isEmpty()) {
+                Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
+                    Text("This list is empty", color = Color.Gray)
+                }
+            } else {
+                LazyVerticalGrid(GridCells.Fixed(2), contentPadding = PaddingValues(16.dp), horizontalArrangement = Arrangement.spacedBy(16.dp), verticalArrangement = Arrangement.spacedBy(16.dp)) {
+                    items(movies) { movie ->
+                        MovieRowCard(movie, { onMovieClick(movie) }, isWatchlisted = viewModel.isInWatchlist(movie), isWatched = viewModel.isMovieWatched(movie.id), onWatchlistToggle = {
+                            if (viewModel.isInWatchlist(movie)) viewModel.removeFromWatchlist(context, movie)
+                            else viewModel.addToWatchlist(context, movie)
+                        })
+                    }
                 }
             }
         }
     }
 }
+
 
 @Composable
 fun KollywoodCatalog(
@@ -813,7 +390,7 @@ fun KollywoodCatalog(
                         )
                         Spacer(modifier = Modifier.height(2.dp))
                         Text(
-                            text = if (errorMessage != null) "Couldn't reach live servers. Displaying cached curated Tamil movies." else "Connected directly to TMDb database. Loading live feeds.",
+                            text = if (errorMessage != null) "Couldn\'t reach live servers. Displaying cached curated Tamil movies." else "Connected directly to TMDb database. Loading live feeds.",
                             fontSize = 11.sp,
                             color = Color(0xFFC5C5D2)
                         )
@@ -830,17 +407,16 @@ fun KollywoodCatalog(
 
         Spacer(modifier = Modifier.height(8.dp))
 
-        // Watchlist Horizontal Carousel Section
         if (watchlistMovies.isNotEmpty()) {
-            MovieRowSection(title = "📂 My Watchlist", movies = watchlistMovies, viewModel = viewModel, onMovieClick = onMovieClick)
+            MovieRowSection(title = "My Watchlist", movies = watchlistMovies, viewModel = viewModel, onMovieClick = onMovieClick)
             Spacer(modifier = Modifier.height(16.dp))
         }
 
-        MovieRowSection(title = "🔥 Trending Tamil Movies", movies = trending, viewModel = viewModel, onMovieClick = onMovieClick)
+        MovieRowSection(title = "Trending Tamil Movies", movies = trending, viewModel = viewModel, onMovieClick = onMovieClick)
         Spacer(modifier = Modifier.height(16.dp))
-        MovieRowSection(title = "⭐ Top Rated Kollywood", movies = topRated, viewModel = viewModel, onMovieClick = onMovieClick)
+        MovieRowSection(title = "Top Rated Kollywood", movies = topRated, viewModel = viewModel, onMovieClick = onMovieClick)
         Spacer(modifier = Modifier.height(16.dp))
-        MovieRowSection(title = "📅 Upcoming Tamil Releases", movies = upcoming, viewModel = viewModel, onMovieClick = onMovieClick)
+        MovieRowSection(title = "Upcoming Tamil Releases", movies = upcoming, viewModel = viewModel, onMovieClick = onMovieClick)
 
         Spacer(modifier = Modifier.height(80.dp))
     }
@@ -904,154 +480,48 @@ fun MovieRowSection(
 fun MovieRowCard(
     movie: TmdbMovie,
     onClick: () -> Unit,
-    modifier: Modifier = Modifier.width(135.dp),
-    isWatchlisted: Boolean = false,
-    isWatched: Boolean = false,
-    onWatchlistToggle: (() -> Unit)? = null,
-    onWatchedToggle: (() -> Unit)? = null
+    modifier: Modifier = Modifier,
+    isWatchlisted: Boolean,
+    isWatched: Boolean,
+    onWatchlistToggle: (() -> Unit)?
 ) {
     Card(
         modifier = modifier
             .clickable(onClick = onClick)
-            .alpha(if (isWatched) 0.4f else 1.0f),
+            .alpha(if (isWatched) 0.6f else 1.0f),
         shape = RoundedCornerShape(10.dp),
-        colors = CardDefaults.cardColors(
-            containerColor = if (isWatched) Color(0xFF0F0F16) else Color(0xFF161622)
-        )
+        colors = CardDefaults.cardColors(containerColor = Color(0xFF161622))
     ) {
-        Column {
-            Box(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .height(180.dp)
-                    .background(Color(0xFF232335))
-            ) {
-                val posterUrl = movie.fullPosterUrl
-                if (!posterUrl.isNullOrEmpty()) {
-                    AsyncImage(
-                        model = posterUrl,
-                        contentDescription = movie.title,
-                        modifier = Modifier.fillMaxSize(),
-                        contentScale = ContentScale.Crop
+        Box(modifier = Modifier.height(200.dp).fillMaxWidth()) {
+            AsyncImage(
+                model = movie.fullPosterUrl,
+                contentDescription = movie.title,
+                modifier = Modifier.fillMaxSize(),
+                contentScale = ContentScale.Crop
+            )
+            Box(modifier = Modifier.fillMaxSize().background(Brush.verticalGradient(listOf(Color.Transparent, Color(0xCC000000)))))
+
+            if (onWatchlistToggle != null) {
+                IconButton(onClick = onWatchlistToggle, modifier = Modifier.align(Alignment.TopEnd).padding(4.dp)) {
+                    Icon(
+                        if (isWatchlisted) Icons.Default.Favorite else Icons.Default.FavoriteBorder,
+                        contentDescription = "Watchlist",
+                        tint = if (isWatchlisted) Color(0xFFFF6B6B) else Color.White
                     )
-                } else {
-                    Box(
-                        modifier = Modifier.fillMaxSize(),
-                        contentAlignment = Alignment.Center
-                    ) {
-                        Icon(
-                            imageVector = Icons.Default.PlayArrow,
-                            contentDescription = null,
-                            tint = Color.Gray,
-                            modifier = Modifier.size(36.dp)
-                        )
-                    }
-                }
-
-                Box(
-                    modifier = Modifier
-                        .fillMaxSize()
-                        .background(
-                            Brush.verticalGradient(
-                                colors = listOf(Color.Transparent, Color(0x99000000)),
-                                startY = 100f
-                            )
-                        )
-                )
-
-                // Overlays: Eye & Heart Icons (Watchlist & Seen)
-                Row(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .align(Alignment.TopStart)
-                        .padding(6.dp),
-                    horizontalArrangement = Arrangement.SpaceBetween,
-                    verticalAlignment = Alignment.CenterVertically
-                ) {
-                    if (onWatchedToggle != null) {
-                        Box(
-                            modifier = Modifier
-                                .size(28.dp)
-                                .clip(RoundedCornerShape(14.dp))
-                                .background(Color.Black.copy(alpha = 0.7f))
-                                .clickable { onWatchedToggle() },
-                            contentAlignment = Alignment.Center
-                        ) {
-                            EyeIcon(
-                                isWatched = isWatched,
-                                modifier = Modifier.size(16.dp)
-                            )
-                        }
-                    } else {
-                        Spacer(modifier = Modifier.size(1.dp))
-                    }
-
-                    if (onWatchlistToggle != null) {
-                        Box(
-                            modifier = Modifier
-                                .size(28.dp)
-                                .clip(RoundedCornerShape(14.dp))
-                                .background(Color.Black.copy(alpha = 0.7f))
-                                .clickable { onWatchlistToggle() },
-                            contentAlignment = Alignment.Center
-                        ) {
-                            Icon(
-                                imageVector = if (isWatchlisted) Icons.Default.Favorite else Icons.Default.FavoriteBorder,
-                                contentDescription = "Watchlist",
-                                tint = if (isWatchlisted) Color(0xFFFF6B6B) else Color.White,
-                                modifier = Modifier.size(16.dp)
-                            )
-                        }
-                    }
-                }
-
-                movie.voteAverage?.let { score ->
-                    if (score > 0) {
-                        Box(
-                            modifier = Modifier
-                                .align(Alignment.BottomEnd)
-                                .padding(6.dp)
-                                .background(Color(0xCC000000), RoundedCornerShape(4.dp))
-                                .padding(horizontal = 4.dp, vertical = 2.dp)
-                        ) {
-                            Row(verticalAlignment = Alignment.CenterVertically) {
-                                Icon(
-                                    imageVector = Icons.Default.Star,
-                                    contentDescription = null,
-                                    tint = Color(0xFFFFD700),
-                                    modifier = Modifier.size(10.dp)
-                                )
-                                Spacer(modifier = Modifier.width(2.dp))
-                                Text(
-                                    text = String.format(Locale.US, "%.1f", score),
-                                    fontSize = 10.sp,
-                                    fontWeight = FontWeight.Bold,
-                                    color = Color.White
-                                )
-                            }
-                        }
-                    }
                 }
             }
 
-            Column(modifier = Modifier.padding(6.dp)) {
-                Text(
-                    text = movie.title,
-                    fontWeight = FontWeight.Bold,
-                    fontSize = 12.sp,
-                    color = Color.White,
-                    maxLines = 1,
-                    overflow = TextOverflow.Ellipsis
-                )
-                movie.releaseDate?.let { date ->
-                    Text(
-                        text = if (date.length >= 4) date.substring(0, 4) else date,
-                        fontSize = 10.sp,
-                        color = Color.Gray
-                    )
+             movie.voteAverage?.let { score ->
+                if (score > 0) {
+                     Row(modifier = Modifier.align(Alignment.BottomStart).padding(8.dp)) {
+                        Icon(Icons.Default.Star, contentDescription = null, tint = Color(0xFFFFD700), modifier = Modifier.size(16.dp))
+                        Spacer(modifier = Modifier.width(4.dp))
+                        Text(String.format(Locale.US, "%.1f", score), color = Color.White, fontWeight = FontWeight.Bold)
+                    }
                 }
             }
         }
+        Text(movie.title, fontWeight = FontWeight.Bold, maxLines = 1, overflow = TextOverflow.Ellipsis, modifier = Modifier.padding(8.dp))
     }
 }
 
@@ -1083,246 +553,79 @@ fun MovieDetailContent(
 
     val scrollState = rememberScrollState()
 
-    BackHandler {
-        onDismiss()
-    }
+    BackHandler { onDismiss() }
 
     Box(modifier = Modifier.fillMaxSize()) {
-        Column(
-            modifier = Modifier
-                .fillMaxSize()
-                .verticalScroll(scrollState)
-        ) {
-            Box(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .height(240.dp)
-            ) {
-                val backdropUrl = movie.fullBackdropUrl ?: movie.fullPosterUrl
-                if (!backdropUrl.isNullOrEmpty()) {
-                    AsyncImage(
-                        model = backdropUrl,
-                        contentDescription = movie.title,
-                        modifier = Modifier.fillMaxSize(),
-                        contentScale = ContentScale.Crop
-                    )
-                } else {
-                    Box(
-                        modifier = Modifier
-                            .fillMaxSize()
-                            .background(Color(0xFF232335)),
-                        contentAlignment = Alignment.Center
-                    ) {
-                        Icon(
-                            imageVector = Icons.Default.PlayArrow,
-                            contentDescription = null,
-                            tint = Color.Gray,
-                            modifier = Modifier.size(56.dp)
-                        )
-                    }
-                }
-
-                Box(
-                    modifier = Modifier
-                        .fillMaxSize()
-                        .background(
-                            Brush.verticalGradient(
-                                colors = listOf(
-                                    Color.Black.copy(alpha = 0.5f),
-                                    Color.Transparent,
-                                    Color(0xFF0C0C12)
-                                )
-                            )
-                        )
-                )
-
-                IconButton(
-                    onClick = onDismiss,
-                    modifier = Modifier
-                        .padding(top = 40.dp, start = 16.dp)
-                        .align(Alignment.TopStart)
-                        .background(Color.Black.copy(alpha = 0.6f), RoundedCornerShape(20.dp))
-                ) {
-                    Icon(
-                        imageVector = Icons.Default.ArrowBack,
-                        contentDescription = "Back",
-                        tint = Color.White
-                    )
+        Column(modifier = Modifier.fillMaxSize().verticalScroll(scrollState)) {
+            Box(modifier = Modifier.fillMaxWidth().height(240.dp)) {
+                AsyncImage(model = movie.fullBackdropUrl ?: movie.fullPosterUrl, contentDescription = movie.title, modifier = Modifier.fillMaxSize(), contentScale = ContentScale.Crop)
+                Box(modifier = Modifier.fillMaxSize().background(Brush.verticalGradient(listOf(Color.Black.copy(alpha = 0.5f), Color.Transparent, Color(0xFF0C0C12)))))
+                IconButton(onClick = onDismiss, modifier = Modifier.padding(top = 40.dp, start = 16.dp).align(Alignment.TopStart).background(Color.Black.copy(alpha = 0.6f), RoundedCornerShape(20.dp))) {
+                    Icon(Icons.Default.ArrowBack, contentDescription = "Back", tint = Color.White)
                 }
             }
 
-            Column(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .padding(horizontal = 20.dp, vertical = 12.dp)
-            ) {
-                Surface(
-                    color = Color(0x33FFD700),
-                    shape = RoundedCornerShape(4.dp)
-                ) {
-                    Text(
-                        text = "KOLLYWOOD SPOTLIGHT",
-                        color = Color(0xFFFFD700),
-                        fontSize = 10.sp,
-                        fontWeight = FontWeight.Bold,
-                        modifier = Modifier.padding(horizontal = 8.dp, vertical = 3.dp),
-                        letterSpacing = 1.sp
-                    )
-                }
-
-                Spacer(modifier = Modifier.height(8.dp))
-
-                Text(
-                    text = movie.title,
-                    fontSize = 24.sp,
-                    fontWeight = FontWeight.ExtraBold,
-                    color = Color.White
-                )
-
+            Column(modifier = Modifier.fillMaxWidth().padding(horizontal = 20.dp, vertical = 12.dp)) {
+                Text(movie.title, fontSize = 24.sp, fontWeight = FontWeight.ExtraBold, color = Color.White)
                 Spacer(modifier = Modifier.height(16.dp))
-
                 Button(
                     onClick = { onPlayMovieClick(movie) },
                     colors = ButtonDefaults.buttonColors(containerColor = Color(0xFFFFD700)),
-                    shape = RoundedCornerShape(12.dp),
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .height(50.dp)
+                    modifier = Modifier.fillMaxWidth().height(50.dp)
                 ) {
-                    Icon(
-                        imageVector = Icons.Default.PlayArrow,
-                        contentDescription = "Play",
-                        tint = Color.Black,
-                        modifier = Modifier.size(24.dp)
-                    )
+                    Icon(Icons.Default.PlayArrow, contentDescription = "Play", tint = Color.Black)
                     Spacer(modifier = Modifier.width(8.dp))
-                    Text(
-                        text = "Play Movie (Free 4K Search)",
-                        color = Color.Black,
-                        fontWeight = FontWeight.Black,
-                        fontSize = 15.sp
-                    )
+                    Text("Play Movie (Free 4K Search)", color = Color.Black, fontWeight = FontWeight.Black, fontSize = 15.sp)
                 }
-
                 val isAdded by remember(movie.id) { derivedStateOf { viewModel.isInWatchlist(movie) } }
                 Spacer(modifier = Modifier.height(10.dp))
                 OutlinedButton(
-                    onClick = {
-                        if (isAdded) {
-                            viewModel.removeFromWatchlist(context, movie)
-                        } else {
-                            viewModel.addToWatchlist(context, movie)
-                        }
+                    onClick = { 
+                        if (isAdded) viewModel.removeFromWatchlist(context, movie)
+                        else viewModel.addToWatchlist(context, movie)
                     },
                     border = BorderStroke(1.5.dp, if (isAdded) Color(0xFFFF6B6B) else Color(0xFFFFD700)),
-                    shape = RoundedCornerShape(12.dp),
-                    colors = ButtonDefaults.outlinedButtonColors(
-                        contentColor = if (isAdded) Color(0xFFFF6B6B) else Color(0xFFFFD700)
-                    ),
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .height(48.dp)
+                    modifier = Modifier.fillMaxWidth().height(48.dp)
                 ) {
-                    Icon(
-                        imageVector = if (isAdded) Icons.Default.Favorite else Icons.Default.FavoriteBorder,
-                        contentDescription = "Watchlist",
-                        tint = if (isAdded) Color(0xFFFF6B6B) else Color(0xFFFFD700),
-                        modifier = Modifier.size(20.dp)
-                    )
+                    Icon(if (isAdded) Icons.Default.Favorite else Icons.Default.FavoriteBorder, "Watchlist", tint = if (isAdded) Color(0xFFFF6B6B) else Color(0xFFFFD700))
                     Spacer(modifier = Modifier.width(8.dp))
-                    Text(
-                        text = if (isAdded) "Remove from Watchlist" else "Add to Watchlist",
-                        fontWeight = FontWeight.Bold,
-                        fontSize = 14.sp
-                    )
+                    Text(if (isAdded) "Remove from Watchlist" else "Add to Watchlist", fontWeight = FontWeight.Bold)
                 }
 
                 Spacer(modifier = Modifier.height(20.dp))
 
-                Text(
-                    text = "Movie Trailer",
-                    fontWeight = FontWeight.Bold,
-                    fontSize = 16.sp,
-                    color = Color(0xFFFFD700)
-                )
+                 Text("Movie Trailer", fontWeight = FontWeight.Bold, fontSize = 16.sp, color = Color(0xFFFFD700))
                 Spacer(modifier = Modifier.height(8.dp))
 
-                Box(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .aspectRatio(16f / 9f)
-                        .clip(RoundedCornerShape(10.dp))
-                        .background(Color(0xFF161622))
-                ) {
+                Box(modifier = Modifier.fillMaxWidth().aspectRatio(16f / 9f).clip(RoundedCornerShape(10.dp)).background(Color(0xFF161622))) {
                     when {
-                        youtubeVideoId == null -> {
-                            Box(
-                                modifier = Modifier.fillMaxSize(),
-                                contentAlignment = Alignment.Center
-                            ) {
-                                CircularProgressIndicator(color = Color(0xFFFFD700))
-                            }
-                        }
-                        youtubeVideoId.startsWith("search:") -> {
-                            YoutubeSearchPlayer(
-                                searchQuery = youtubeVideoId.removePrefix("search:"),
-                                modifier = Modifier.fillMaxSize()
-                            )
-                        }
-                        else -> {
-                            YoutubePlayer(youtubeVideoId = youtubeVideoId, modifier = Modifier.fillMaxSize())
-                        }
+                        youtubeVideoId == null -> Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) { CircularProgressIndicator(color = Color(0xFFFFD700)) }
+                        youtubeVideoId.startsWith("search:") -> YoutubeSearchPlayer(youtubeVideoId.removePrefix("search:"), Modifier.fillMaxSize())
+                        else -> YoutubePlayer(youtubeVideoId, Modifier.fillMaxSize())
                     }
                 }
 
                 Spacer(modifier = Modifier.height(20.dp))
 
-                Text(
-                    text = "Plot Summary",
-                    fontWeight = FontWeight.Bold,
-                    fontSize = 16.sp,
-                    color = Color(0xFFFFD700)
-                )
+                Text("Plot Summary", fontWeight = FontWeight.Bold, fontSize = 16.sp, color = Color(0xFFFFD700))
                 Spacer(modifier = Modifier.height(6.dp))
-                Text(
-                    text = movie.overview.orEmpty().ifEmpty { "Plot details are currently being curated." },
-                    fontSize = 13.sp,
-                    color = Color(0xFFC4C4D4),
-                    lineHeight = 20.sp
-                )
+                Text(movie.overview.orEmpty().ifEmpty { "Plot details are currently being curated." }, fontSize = 13.sp, color = Color(0xFFC4C4D4), lineHeight = 20.sp)
 
                 Spacer(modifier = Modifier.height(24.dp))
 
-                Text(
-                    text = "Starring Cast",
-                    fontWeight = FontWeight.Bold,
-                    fontSize = 16.sp,
-                    color = Color(0xFFFFD700)
-                )
+                Text("Starring Cast", fontWeight = FontWeight.Bold, fontSize = 16.sp, color = Color(0xFFFFD700))
                 Spacer(modifier = Modifier.height(10.dp))
 
                 if (creditsLoading && credits == null) {
-                    Box(
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .height(80.dp),
-                        contentAlignment = Alignment.Center
-                    ) {
-                        CircularProgressIndicator(color = Color(0xFFFFD700))
-                    }
+                    Box(Modifier.fillMaxWidth().height(80.dp), contentAlignment = Alignment.Center) { CircularProgressIndicator(color = Color(0xFFFFD700)) }
                 } else {
                     val castList = credits?.cast ?: emptyList()
                     if (castList.isEmpty()) {
                         Text("No cast details available.", color = Color.Gray, fontSize = 12.sp)
                     } else {
-                        LazyRow(
-                            horizontalArrangement = Arrangement.spacedBy(14.dp),
-                            contentPadding = PaddingValues(bottom = 16.dp)
-                        ) {
+                        LazyRow(horizontalArrangement = Arrangement.spacedBy(14.dp), contentPadding = PaddingValues(bottom = 16.dp)) {
                             items(castList) { castMember ->
-                                CastMemberBubble(castMember = castMember) {
-                                    viewModel.fetchPersonDetails(context, castMember.id)
-                                }
+                                CastMemberBubble(castMember = castMember) { viewModel.fetchPersonDetails(context, castMember.id) }
                             }
                         }
                     }
@@ -1330,86 +633,20 @@ fun MovieDetailContent(
             }
         }
 
-        AnimatedVisibility(
-            visible = selectedPerson != null,
-            enter = androidx.compose.animation.slideInVertically(
-                initialOffsetY = { it },
-                animationSpec = androidx.compose.animation.core.tween(durationMillis = 450, easing = androidx.compose.animation.core.EaseOutQuart)
-            ) + fadeIn(animationSpec = androidx.compose.animation.core.tween(450)),
-            exit = androidx.compose.animation.slideOutVertically(
-                targetOffsetY = { it },
-                animationSpec = androidx.compose.animation.core.tween(durationMillis = 350, easing = androidx.compose.animation.core.EaseInQuart)
-            ) + fadeOut(animationSpec = androidx.compose.animation.core.tween(350)),
-            modifier = Modifier.fillMaxSize()
-        ) {
-            val person = selectedPerson
-            if (person != null) {
-                CastPersonOverlay(
-                    person = person,
-                    credits = selectedPersonCredits,
-                    loading = personLoading,
-                    onBack = { viewModel.clearSelectedPerson() },
-                    onMovieClick = { selectedRelatedMovie ->
-                        onRelatedMovieClick(selectedRelatedMovie)
-                    }
-                )
+        AnimatedVisibility(selectedPerson != null, enter = fadeIn(), exit = fadeOut()) {
+            selectedPerson?.let { person ->
+                CastPersonOverlay(person, selectedPersonCredits, personLoading, { viewModel.clearSelectedPerson() }) { onRelatedMovieClick(it) }
             }
         }
     }
 }
 
 @Composable
-fun CastMemberBubble(
-    castMember: TmdbCastMember,
-    onClick: () -> Unit
-) {
-    Column(
-        modifier = Modifier
-            .width(80.dp)
-            .clickable(onClick = onClick)
-            .padding(vertical = 4.dp),
-        horizontalAlignment = Alignment.CenterHorizontally
-    ) {
-        val profileUrl = castMember.fullProfileUrl
-        Box(
-            modifier = Modifier
-                .size(68.dp)
-                .clip(androidx.compose.foundation.shape.CircleShape)
-                .background(Color(0xFF222232))
-                .border(2.dp, Color(0xFFFFD700).copy(alpha = 0.5f), androidx.compose.foundation.shape.CircleShape)
-        ) {
-            if (!profileUrl.isNullOrEmpty()) {
-                AsyncImage(
-                    model = profileUrl,
-                    contentDescription = castMember.name,
-                    modifier = Modifier.fillMaxSize(),
-                    contentScale = ContentScale.Crop
-                )
-            } else {
-                Box(
-                    modifier = Modifier.fillMaxSize(),
-                    contentAlignment = Alignment.Center
-                ) {
-                    Text(
-                        text = castMember.name.firstOrNull()?.toString() ?: "",
-                        fontWeight = FontWeight.Bold,
-                        color = Color(0xFFFFD700)
-                    )
-                }
-            }
-        }
-
+fun CastMemberBubble(castMember: TmdbCastMember, onClick: () -> Unit) {
+    Column(Modifier.width(80.dp).clickable(onClick = onClick), horizontalAlignment = Alignment.CenterHorizontally) {
+        AsyncImage(model = castMember.fullProfileUrl, contentDescription = castMember.name, modifier = Modifier.size(68.dp).clip(androidx.compose.foundation.shape.CircleShape).background(Color(0xFF222232)).border(2.dp, Color(0xFFFFD700).copy(alpha = 0.5f), androidx.compose.foundation.shape.CircleShape), contentScale = ContentScale.Crop)
         Spacer(modifier = Modifier.height(4.dp))
-
-        Text(
-            text = castMember.name,
-            fontWeight = FontWeight.Bold,
-            fontSize = 10.sp,
-            color = Color.White,
-            maxLines = 1,
-            overflow = TextOverflow.Ellipsis,
-            textAlign = TextAlign.Center
-        )
+        Text(castMember.name, fontWeight = FontWeight.Bold, fontSize = 10.sp, maxLines = 1, overflow = TextOverflow.Ellipsis, textAlign = TextAlign.Center)
     }
 }
 
@@ -1421,182 +658,53 @@ fun CastPersonOverlay(
     onBack: () -> Unit,
     onMovieClick: (TmdbMovie) -> Unit
 ) {
-    val context = LocalContext.current
     val scrollState = rememberScrollState()
 
-    BackHandler {
-        onBack()
-    }
+    BackHandler { onBack() }
 
-    Surface(
-        modifier = Modifier.fillMaxSize(),
-        color = Color(0xFF09090D)
-    ) {
-        Column(
-            modifier = Modifier
-                .fillMaxSize()
-                .verticalScroll(scrollState)
-        ) {
-            Row(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .padding(top = 40.dp, start = 12.dp, end = 16.dp, bottom = 12.dp),
-                verticalAlignment = Alignment.CenterVertically
-            ) {
-                IconButton(
-                    onClick = onBack,
-                    modifier = Modifier.background(Color.White.copy(alpha = 0.05f), RoundedCornerShape(20.dp))
-                ) {
-                    Icon(
-                        imageVector = Icons.Default.ArrowBack,
-                        contentDescription = "Back",
-                        tint = Color(0xFFFFD700)
-                    )
-                }
-                Spacer(modifier = Modifier.width(12.dp))
-                Text(
-                    text = "Cast Bio Profile",
-                    fontWeight = FontWeight.ExtraBold,
-                    fontSize = 16.sp,
-                    color = Color.White
-                )
+    Surface(color = Color(0xFF09090D)) {
+        Column(Modifier.fillMaxSize().verticalScroll(scrollState)) {
+            Row(Modifier.fillMaxWidth().padding(top = 40.dp, start = 12.dp, end = 16.dp, bottom = 12.dp), verticalAlignment = Alignment.CenterVertically) {
+                IconButton(onClick = onBack) { Icon(Icons.Default.ArrowBack, null, tint = Color(0xFFFFD700)) }
+                Spacer(Modifier.width(12.dp))
+                Text("Cast Bio Profile", fontWeight = FontWeight.ExtraBold, fontSize = 16.sp)
             }
 
             if (loading) {
-                Box(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .height(250.dp),
-                    contentAlignment = Alignment.Center
-                ) {
-                    CircularProgressIndicator(color = Color(0xFFFFD700))
-                }
+                Box(Modifier.fillMaxWidth().height(250.dp), contentAlignment = Alignment.Center) { CircularProgressIndicator(color = Color(0xFFFFD700)) }
             } else {
-                Row(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .padding(horizontal = 20.dp, vertical = 12.dp),
-                    verticalAlignment = Alignment.Top
-                ) {
-                    val profileUrl = person.fullProfileUrl
-                    Box(
-                        modifier = Modifier
-                            .size(width = 100.dp, height = 135.dp)
-                            .clip(RoundedCornerShape(8.dp))
-                            .background(Color(0xFF161622))
-                            .border(1.5.dp, Color(0xFFFFD700).copy(alpha = 0.3f), RoundedCornerShape(8.dp))
-                    ) {
-                        if (!profileUrl.isNullOrEmpty()) {
-                            AsyncImage(
-                                model = profileUrl,
-                                contentDescription = person.name,
-                                modifier = Modifier.fillMaxSize(),
-                                contentScale = ContentScale.Crop
-                            )
-                        } else {
-                            Box(
-                                modifier = Modifier.fillMaxSize(),
-                                contentAlignment = Alignment.Center
-                            ) {
-                                Icon(
-                                    imageVector = Icons.Default.PlayArrow,
-                                    contentDescription = null,
-                                    tint = Color.Gray,
-                                    modifier = Modifier.size(36.dp)
-                                )
-                            }
-                        }
-                    }
-
-                    Spacer(modifier = Modifier.width(16.dp))
-
-                    Column(modifier = Modifier.weight(1f)) {
-                        Text(
-                            text = person.name,
-                            fontWeight = FontWeight.Black,
-                            fontSize = 18.sp,
-                            color = Color.White
-                        )
-                        person.knownForDepartment?.let { dept ->
-                            Text(
-                                text = "Profession: $dept",
-                                fontWeight = FontWeight.SemiBold,
-                                fontSize = 13.sp,
-                                color = Color(0xFFFFD700)
-                            )
-                        }
-                        person.birthday?.let { bday ->
-                            Spacer(modifier = Modifier.height(4.dp))
-                            Text(
-                                text = "Born: $bday",
-                                fontSize = 12.sp,
-                                color = Color.White.copy(alpha = 0.7f)
-                            )
-                        }
+                Row(Modifier.fillMaxWidth().padding(horizontal = 20.dp, vertical = 12.dp), verticalAlignment = Alignment.Top) {
+                    AsyncImage(model = person.fullProfileUrl, contentDescription = person.name, modifier = Modifier.size(width = 100.dp, height = 135.dp).clip(RoundedCornerShape(8.dp)).background(Color(0xFF161622)).border(1.5.dp, Color(0xFFFFD700).copy(alpha = 0.3f), RoundedCornerShape(8.dp)), contentScale = ContentScale.Crop)
+                    Spacer(Modifier.width(16.dp))
+                    Column(Modifier.weight(1f)) {
+                        Text(person.name, fontWeight = FontWeight.Black, fontSize = 18.sp)
+                        person.knownForDepartment?.let { Text("Profession: $it", fontWeight = FontWeight.SemiBold, fontSize = 13.sp, color = Color(0xFFFFD700)) }
+                        person.birthday?.let { Spacer(modifier = Modifier.height(4.dp)); Text("Born: $it", fontSize = 12.sp, color = Color.White.copy(alpha = 0.7f)) }
                     }
                 }
 
-                Spacer(modifier = Modifier.height(16.dp))
+                Spacer(Modifier.height(16.dp))
 
-                Column(modifier = Modifier.padding(horizontal = 20.dp)) {
-                    Text(
-                        text = "Biography",
-                        fontWeight = FontWeight.Bold,
-                        fontSize = 16.sp,
-                        color = Color(0xFFFFD700)
-                    )
-                    Spacer(modifier = Modifier.height(6.dp))
-                    Text(
-                        text = person.biography.orEmpty().ifEmpty { "Biography currently not synced online." },
-                        fontSize = 12.sp,
-                        color = Color(0xFFC5C5D2),
-                        lineHeight = 18.sp
-                    )
+                Column(Modifier.padding(horizontal = 20.dp)) {
+                    Text("Biography", fontWeight = FontWeight.Bold, fontSize = 16.sp, color = Color(0xFFFFD700))
+                    Spacer(Modifier.height(6.dp))
+                    Text(person.biography.orEmpty().ifEmpty { "Biography currently not synced online." }, fontSize = 12.sp, color = Color(0xFFC5C5D2), lineHeight = 18.sp)
 
-                    Spacer(modifier = Modifier.height(24.dp))
+                    Spacer(Modifier.height(24.dp))
 
-                    Text(
-                        text = "Famous Movie Appearances",
-                        fontWeight = FontWeight.Bold,
-                        fontSize = 16.sp,
-                        color = Color(0xFFFFD700)
-                    )
-                    Spacer(modifier = Modifier.height(10.dp))
+                    Text("Famous Movie Appearances", fontWeight = FontWeight.Bold, fontSize = 16.sp, color = Color(0xFFFFD700))
+                    Spacer(Modifier.height(10.dp))
 
                     val relatedMovies = credits?.cast?.take(8) ?: emptyList()
                     if (relatedMovies.isEmpty()) {
                         Text("No appearances sync data.", color = Color.Gray, fontSize = 12.sp)
                     } else {
-                        LazyRow(
-                            horizontalArrangement = Arrangement.spacedBy(12.dp),
-                            contentPadding = PaddingValues(bottom = 20.dp)
-                        ) {
+                        LazyRow(horizontalArrangement = Arrangement.spacedBy(12.dp), contentPadding = PaddingValues(bottom = 20.dp)) {
                             items(relatedMovies) { credit ->
                                 MovieRowCard(
-                                    movie = TmdbMovie(
-                                        id = credit.id,
-                                        title = credit.title,
-                                        originalTitle = null,
-                                        overview = null,
-                                        posterPath = credit.posterPath,
-                                        backdropPath = null,
-                                        releaseDate = credit.releaseDate,
-                                        voteAverage = credit.voteAverage
-                                    ),
-                                    onClick = {
-                                        onMovieClick(
-                                            TmdbMovie(
-                                                id = credit.id,
-                                                title = credit.title,
-                                                originalTitle = null,
-                                                overview = null,
-                                                posterPath = credit.posterPath,
-                                                backdropPath = null,
-                                                releaseDate = credit.releaseDate,
-                                                voteAverage = credit.voteAverage
-                                            )
-                                        )
-                                    }
+                                    movie = TmdbMovie(credit.id, credit.title, null, null, credit.posterPath, null, credit.releaseDate, credit.voteAverage),
+                                    onClick = { onMovieClick(TmdbMovie(credit.id, credit.title, null, null, credit.posterPath, null, credit.releaseDate, credit.voteAverage)) },
+                                    isWatchlisted = false, isWatched = false, onWatchlistToggle = null
                                 )
                             }
                         }
@@ -1608,245 +716,70 @@ fun CastPersonOverlay(
 }
 
 @Composable
-fun YoutubePlayer(
-    youtubeVideoId: String,
-    modifier: Modifier = Modifier
-) {
-    var webViewInstance: android.webkit.WebView? by remember { mutableStateOf(null) }
+fun YoutubePlayer(youtubeVideoId: String, modifier: Modifier = Modifier) {
+    var webViewInstance: WebView? by remember { mutableStateOf(null) }
 
     DisposableEffect(Unit) {
         onDispose {
-            webViewInstance?.let { webView ->
-                try {
-                    (webView.parent as? android.view.ViewGroup)?.removeView(webView)
-                    webView.stopLoading()
-                    webView.loadUrl("about:blank")
-                    webView.destroy()
-                } catch (e: Throwable) {
-                    android.util.Log.e("YoutubePlayer", "Error destroying WebView", e)
-                }
-            }
+            webViewInstance?.destroy()
         }
     }
 
     AndroidView(
-        modifier = modifier
-            .fillMaxWidth()
-            .aspectRatio(16f / 9f)
-            .clip(RoundedCornerShape(8.dp)),
+        modifier = modifier,
         factory = { ctx ->
-            android.webkit.WebView(ctx).apply {
-                settings.apply {
-                    javaScriptEnabled = true
-                    domStorageEnabled = true
-                    mediaPlaybackRequiresUserGesture = false
-                    loadWithOverviewMode = true
-                    useWideViewPort = true
-                    allowFileAccess = true
-                    allowContentAccess = true
-                    databaseEnabled = true
-                    userAgentString = "Mozilla/5.0 (Linux; Android 10; K) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Mobile Safari/537.36"
-                }
-                webChromeClient = android.webkit.WebChromeClient()
-                webViewClient = android.webkit.WebViewClient()
+            WebView(ctx).apply {
+                settings.javaScriptEnabled = true
+                webChromeClient = WebChromeClient()
+                webViewClient = WebViewClient()
                 webViewInstance = this
             }
         },
-        update = { webView ->
-            val currentTag = webView.tag as? String
-            if (currentTag != youtubeVideoId) {
-                webView.tag = youtubeVideoId
-                val embedHtml = """
-                    <!DOCTYPE html>
-                    <html>
-                    <head>
-                        <meta name="viewport" content="width=device-width, initial-scale=1.0">
-                        <meta name="referrer" content="strict-origin-when-cross-origin">
-                    </head>
-                    <body style="margin:0;padding:0;background-color:#000000;">
-                        <iframe
-                            width="100%"
-                            height="100%"
-                            src="https://www.youtube-nocookie.com/embed/$youtubeVideoId?autoplay=1&mute=0&controls=1&rel=0&showinfo=0"
-                            title="Trailer"
-                            frameborder="0"
-                            allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture"
-                            allowfullscreen
-                            style="position:fixed;top:0;left:0;width:100%;height:100%;border:none;margin:0;padding:0;overflow:hidden;z-index:999999;">
-                        </iframe>
-                    </body>
-                    </html>
-                """.trimIndent()
-                webView.loadDataWithBaseURL(
-                    "https://www.youtube-nocookie.com",
-                    embedHtml,
-                    "text/html",
-                    "UTF-8",
-                    null
-                )
-            }
+        update = { 
+            val embedHtml = "<html><body><iframe width=\"100%\" height=\"100%\" src=\"https://www.youtube-nocookie.com/embed/$youtubeVideoId?autoplay=1\" frameborder=\"0\" allowfullscreen></iframe></body></html>"
+            it.loadData(embedHtml, "text/html", "utf-8")
         }
     )
 }
 
 @Composable
-fun YoutubeSearchPlayer(
-    searchQuery: String,
-    modifier: Modifier = Modifier
-) {
-    var webViewInstance: android.webkit.WebView? by remember { mutableStateOf(null) }
-    val encodedQuery = remember(searchQuery) {
-        java.net.URLEncoder.encode(searchQuery, "UTF-8")
-    }
-
-    DisposableEffect(Unit) {
-        onDispose {
-            webViewInstance?.let { webView ->
-                try {
-                    (webView.parent as? android.view.ViewGroup)?.removeView(webView)
-                    webView.stopLoading()
-                    webView.loadUrl("about:blank")
-                    webView.destroy()
-                } catch (e: Throwable) {
-                    android.util.Log.e("YoutubeSearchPlayer", "Error destroying WebView", e)
-                }
-            }
-        }
-    }
-
+fun YoutubeSearchPlayer(searchQuery: String, modifier: Modifier = Modifier) {
     AndroidView(
-        modifier = modifier
-            .fillMaxWidth()
-            .aspectRatio(16f / 9f)
-            .clip(RoundedCornerShape(8.dp)),
+        modifier = modifier,
         factory = { ctx ->
-            android.webkit.WebView(ctx).apply {
-                settings.apply {
-                    javaScriptEnabled = true
-                    domStorageEnabled = true
-                    mediaPlaybackRequiresUserGesture = false
-                    loadWithOverviewMode = true
-                    useWideViewPort = true
-                    allowFileAccess = true
-                    allowContentAccess = true
-                    databaseEnabled = true
-                    userAgentString = "Mozilla/5.0 (Linux; Android 10; K) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Mobile Safari/537.36"
+             WebView(ctx).apply {
+                settings.javaScriptEnabled = true
+                webChromeClient = WebChromeClient()
+                webViewClient = object: WebViewClient() {
+                    override fun onPageFinished(view: WebView?, url: String?) {
+                        // Auto-click the first video once the search results page loads
+                        view?.evaluateJavascript("(function() { document.querySelector(\'a#video-title\').click(); })();", null)
+                    }
                 }
-                webChromeClient = android.webkit.WebChromeClient()
-                webViewClient = android.webkit.WebViewClient()
-                webViewInstance = this
             }
         },
-        update = { webView ->
-            val tag = "search:$encodedQuery"
-            if (webView.tag as? String != tag) {
-                webView.tag = tag
-                val embedHtml = """
-                    <!DOCTYPE html>
-                    <html>
-                    <head>
-                        <meta name="viewport" content="width=device-width, initial-scale=1.0">
-                        <meta name="referrer" content="strict-origin-when-cross-origin">
-                    </head>
-                    <body style="margin:0;padding:0;background-color:#000000;">
-                        <iframe
-                            width="100%"
-                            height="100%"
-                            src="https://www.youtube-nocookie.com/embed?listType=search&list=$encodedQuery&autoplay=1&mute=0&controls=1&rel=0&showinfo=0"
-                            title="Trailer"
-                            frameborder="0"
-                            allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture"
-                            allowfullscreen
-                            style="position:fixed;top:0;left:0;width:100%;height:100%;border:none;margin:0;padding:0;overflow:hidden;z-index:999999;">
-                        </iframe>
-                    </body>
-                    </html>
-                """.trimIndent()
-                webView.loadDataWithBaseURL(
-                    "https://www.youtube-nocookie.com",
-                    embedHtml,
-                    "text/html",
-                    "UTF-8",
-                    null
-                )
-            }
-        }
+        update = { 
+            it.loadUrl("https://www.youtube.com/results?search_query=$searchQuery")
+         }
     )
 }
 
 @Composable
-fun ErrorStateScreen(
-    message: String,
-    onRetry: () -> Unit
-) {
-    Box(
-        modifier = Modifier.fillMaxSize(),
-        contentAlignment = Alignment.Center
-    ) {
-        Column(
-            horizontalAlignment = Alignment.CenterHorizontally,
-            modifier = Modifier.padding(24.dp)
-        ) {
-            Icon(
-                imageVector = Icons.Default.Warning,
-                contentDescription = null,
-                tint = Color(0xFFFF6B6B),
-                modifier = Modifier.size(48.dp)
-            )
-            Spacer(modifier = Modifier.height(16.dp))
-            Text(
-                text = "Failed to load movies",
-                fontWeight = FontWeight.Bold,
-                fontSize = 16.sp,
-                color = Color.White
-            )
-            Spacer(modifier = Modifier.height(8.dp))
-            Text(
-                text = message,
-                fontSize = 12.sp,
-                color = Color.Gray,
-                textAlign = TextAlign.Center
-            )
-            Spacer(modifier = Modifier.height(16.dp))
-            Button(
-                onClick = onRetry,
-                colors = ButtonDefaults.buttonColors(containerColor = Color(0xFFFFD700))
-            ) {
-                Text("Retry", color = Color.Black)
-            }
+fun ErrorStateScreen(message: String, onRetry: () -> Unit) {
+    Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
+        Column(horizontalAlignment = Alignment.CenterHorizontally, modifier = Modifier.padding(24.dp)) {
+            Icon(Icons.Default.Warning, null, tint = Color(0xFFFF6B6B), modifier = Modifier.size(48.dp))
+            Spacer(Modifier.height(16.dp))
+            Text("Failed to load movies", fontWeight = FontWeight.Bold, fontSize = 16.sp)
+            Spacer(Modifier.height(8.dp))
+            Text(message, fontSize = 12.sp, color = Color.Gray, textAlign = TextAlign.Center)
+            Spacer(Modifier.height(16.dp))
+            Button(onClick = onRetry, colors = ButtonDefaults.buttonColors(containerColor = Color(0xFFFFD700))) { Text("Retry", color = Color.Black) }
         }
     }
 }
 
 @Composable
-fun EyeIcon(
-    isWatched: Boolean,
-    modifier: Modifier = Modifier
-) {
-    val tint = if (isWatched) Color(0xFFFFD700) else Color.White.copy(alpha = 0.8f)
-    androidx.compose.foundation.Canvas(modifier = modifier) {
-        val w = size.width
-        val h = size.height
-        
-        // Draw eye shape outer path
-        val path = androidx.compose.ui.graphics.Path().apply {
-            moveTo(w * 0.1f, h * 0.5f)
-            cubicTo(w * 0.35f, h * 0.2f, w * 0.65f, h * 0.2f, w * 0.9f, h * 0.5f)
-            cubicTo(w * 0.65f, h * 0.8f, w * 0.35f, h * 0.8f, w * 0.1f, h * 0.5f)
-            close()
-        }
-        drawPath(
-            path = path,
-            color = tint,
-            style = androidx.compose.ui.graphics.drawscope.Stroke(width = 1.5.dp.toPx())
-        )
-        
-        // Draw pupil (inner circle)
-        drawCircle(
-            color = tint,
-            radius = w * 0.18f,
-            center = androidx.compose.ui.geometry.Offset(w * 0.5f, h * 0.5f),
-            style = if (isWatched) androidx.compose.ui.graphics.drawscope.Fill else androidx.compose.ui.graphics.drawscope.Stroke(width = 1.5.dp.toPx())
-        )
-    }
+fun EyeIcon(isWatched: Boolean, modifier: Modifier = Modifier) {
+    Icon(if (isWatched) Icons.Default.Visibility else Icons.Default.VisibilityOff, contentDescription = "Watched", tint = if (isWatched) Color(0xFFFFD700) else Color.White, modifier = modifier)
 }

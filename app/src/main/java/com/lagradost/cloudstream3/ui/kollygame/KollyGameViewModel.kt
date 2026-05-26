@@ -153,12 +153,19 @@ class KollyGameViewModel : ViewModel() {
 
     private val _isSearching = MutableStateFlow<Boolean>(false)
     val isSearching: StateFlow<Boolean> = _isSearching.asStateFlow()
+    
+    private val _isLoadingMore = MutableStateFlow<Boolean>(false)
+    val isLoadingMore: StateFlow<Boolean> = _isLoadingMore.asStateFlow()
 
     val selectedGenre = MutableStateFlow<String>("All")
     val selectedYear = MutableStateFlow<String>("All")
     val selectedRating = MutableStateFlow<String>("All")
     val selectedLanguage = MutableStateFlow<String>("ta") // Default Tamil
     val searchQuery = MutableStateFlow<String>("")
+    val actorQuery = MutableStateFlow<String>("")
+
+    private var currentPage = 1
+    private var totalPages = 1
 
     // Map genres to TMDB genre IDs
     private val genreMap = mapOf(
@@ -181,26 +188,34 @@ class KollyGameViewModel : ViewModel() {
         "War" to 10752L
     )
 
-    fun searchAndFilterMovies(ctx: Context) {
+    fun searchAndFilterMovies(ctx: Context, isNewSearch: Boolean = true) {
         viewModelScope.launch {
+            if (isNewSearch) {
+                currentPage = 1
+                totalPages = 1
+                _searchResultMovies.value = emptyList()
+            }
+
             val query = searchQuery.value.trim()
             val genreName = selectedGenre.value
             val year = selectedYear.value
             val rating = selectedRating.value
             val lang = selectedLanguage.value
+            val actor = actorQuery.value.trim()
 
-            // If query is empty and all filters are "All" / defaults, reset active search
-            if (query.isEmpty() && genreName == "All" && year == "All" && rating == "All" && lang == "ta") {
+            if (query.isEmpty() && genreName == "All" && year == "All" && rating == "All" && lang == "ta" && actor.isEmpty()) {
                 _isSearching.value = false
-                _searchResultMovies.value = emptyList()
                 return@launch
             }
 
             _isSearching.value = true
+            if (currentPage > 1) {
+                _isLoadingMore.value = true
+            }
+
             try {
                 val apiKey = getTmdbKey(ctx)
                 if (apiKey.isBlank() || apiKey == "PLACEHOLDER_TMDB_KEY") {
-                    // Falls back locally on curated lists
                     val allLocal = getCuratedTrendingMovies() + getCuratedTopRatedMovies() + getCuratedUpcomingMovies()
                     val filtered = allLocal.distinctBy { it.id }.filter { movie ->
                         val matchesQuery = query.isEmpty() || movie.title.contains(query, ignoreCase = true)
@@ -212,62 +227,70 @@ class KollyGameViewModel : ViewModel() {
                     return@launch
                 }
 
-                // If query is not empty, use /search/movie first, then filter locally
-                if (query.isNotEmpty()) {
-                    val encodedQuery = java.net.URLEncoder.encode(query, "UTF-8")
-                    val searchUrl = "https://api.themoviedb.org/3/search/movie?api_key=$apiKey&query=$encodedQuery&with_original_language=$lang&page=1"
-                    val results = withContext(Dispatchers.IO) { fetchMoviesFromApi(searchUrl) }
-                    
-                    val genreId = genreMap[genreName]
-                    val filtered = results.filter { movie ->
-                        val matchesYear = year == "All" || movie.releaseDate?.startsWith(year) == true
-                        val matchesRating = rating == "All" || (movie.voteAverage ?: 0.0) >= (rating.replace("+", "").toDoubleOrNull() ?: 0.0)
-                        val matchesGenre = genreId == null || hasGenreLocalCheck(ctx, movie.id, genreId)
-                        matchesYear && matchesRating && matchesGenre
-                    }
-                    _searchResultMovies.value = filtered
+                val actorId = if (actor.isNotEmpty()) {
+                    findActorId(ctx, actor)
+                } else null
+                
+                val url = constructSearchUrl(apiKey, query, lang, genreName, year, rating, actorId)
+                val (movies, newTotalPages) = withContext(Dispatchers.IO) { fetchMoviesFromApi(url) }
+                
+                totalPages = newTotalPages
+                if (isNewSearch) {
+                    _searchResultMovies.value = movies
                 } else {
-                    // Blank query with selected filters: use advanced /discover/movie API directly!
-                    val genreId = genreMap[genreName]
-                    val ratingThreshold = rating.replace("+", "").toDoubleOrNull() ?: 0.0
-                    
-                    var discoverUrl = "https://api.themoviedb.org/3/discover/movie?api_key=$apiKey&with_original_language=$lang&sort_by=popularity.desc&page=1"
-                    if (genreId != null) {
-                        discoverUrl += "&with_genres=$genreId"
-                    }
-                    if (year != "All") {
-                        discoverUrl += "&primary_release_year=$year"
-                    }
-                    if (ratingThreshold > 0.0) {
-                        discoverUrl += "&vote_average.gte=$ratingThreshold"
-                    }
-
-                    val results = withContext(Dispatchers.IO) { fetchMoviesFromApi(discoverUrl) }
-                    _searchResultMovies.value = results
+                    _searchResultMovies.value = _searchResultMovies.value + movies
                 }
+
             } catch (e: Exception) {
                 Log.e("KollyGameVM", "Error searching and filtering movies", e)
-                _searchResultMovies.value = emptyList()
+                if (isNewSearch) _searchResultMovies.value = emptyList()
+            } finally {
+                if (currentPage == 1) _isSearching.value = true
+                _isLoadingMore.value = false
             }
         }
     }
+    
+    fun loadMoreMovies(ctx: Context) {
+        if (currentPage < totalPages && !_isLoadingMore.value) {
+            currentPage++
+            searchAndFilterMovies(ctx, isNewSearch = false)
+        }
+    }
 
-    private suspend fun hasGenreLocalCheck(ctx: Context, movieId: Long, targetGenreId: Long): Boolean {
+    private suspend fun findActorId(ctx: Context, actorName: String): Long? {
         return withContext(Dispatchers.IO) {
             try {
                 val apiKey = getTmdbKey(ctx)
-                val url = "https://api.themoviedb.org/3/movie/$movieId?api_key=$apiKey"
+                val encodedName = java.net.URLEncoder.encode(actorName, "UTF-8")
+                val url = "https://api.themoviedb.org/3/search/person?api_key=$apiKey&query=$encodedName"
                 val json = URL(url).openStream().bufferedReader().readText()
-                val genresArr = JSONObject(json).optJSONArray("genres") ?: return@withContext false
-                for (i in 0 until genresArr.length()) {
-                    if (genresArr.getJSONObject(i).optLong("id") == targetGenreId) {
-                        return@withContext true
-                    }
+                val results = JSONObject(json).optJSONArray("results")
+                if (results != null && results.length() > 0) {
+                    results.getJSONObject(0).getLong("id")
+                } else {
+                    null
                 }
-                false
             } catch (e: Exception) {
-                false
+                Log.e("KollyGameVM", "Failed to find actor ID", e)
+                null
             }
+        }
+    }
+    
+    private fun constructSearchUrl(apiKey: String, query: String, lang: String, genreName: String, year: String, rating: String, actorId: Long?): String {
+        val genreId = genreMap[genreName]
+        val ratingThreshold = rating.replace("+", "").toDoubleOrNull() ?: 0.0
+
+        return if (query.isNotEmpty()) {
+             "https://api.themoviedb.org/3/search/movie?api_key=$apiKey&query=${java.net.URLEncoder.encode(query, "UTF-8")}&with_original_language=$lang&page=$currentPage"
+        } else {
+            var discoverUrl = "https://api.themoviedb.org/3/discover/movie?api_key=$apiKey&with_original_language=$lang&sort_by=popularity.desc&page=$currentPage"
+            if (genreId != null) discoverUrl += "&with_genres=$genreId"
+            if (year != "All") discoverUrl += "&primary_release_year=$year"
+            if (ratingThreshold > 0.0) discoverUrl += "&vote_average.gte=$ratingThreshold"
+            if (actorId != null) discoverUrl += "&with_cast=$actorId"
+            discoverUrl
         }
     }
 
@@ -308,13 +331,13 @@ class KollyGameViewModel : ViewModel() {
                     
                     val results = coroutineScope {
                         val trendingDeferred = async(Dispatchers.IO) {
-                            fetchMoviesFromApi("https://api.themoviedb.org/3/discover/movie?api_key=$apiKey&with_original_language=ta&region=IN&sort_by=popularity.desc&page=1")
+                            fetchMoviesFromApi("https://api.themoviedb.org/3/discover/movie?api_key=$apiKey&with_original_language=ta&region=IN&sort_by=popularity.desc&page=1").first
                         }
                         val topRatedDeferred = async(Dispatchers.IO) {
-                            fetchMoviesFromApi("https://api.themoviedb.org/3/discover/movie?api_key=$apiKey&with_original_language=ta&region=IN&sort_by=vote_average.desc&vote_count.gte=8&page=1")
+                            fetchMoviesFromApi("https://api.themoviedb.org/3/discover/movie?api_key=$apiKey&with_original_language=ta&region=IN&sort_by=vote_average.desc&vote_count.gte=8&page=1").first
                         }
                         val upcomingDeferred = async(Dispatchers.IO) {
-                            fetchMoviesFromApi("https://api.themoviedb.org/3/discover/movie?api_key=$apiKey&with_original_language=ta&region=IN&sort_by=primary_release_date.asc&primary_release_date.gte=$todayDate&page=1")
+                            fetchMoviesFromApi("https://api.themoviedb.org/3/discover/movie?api_key=$apiKey&with_original_language=ta&region=IN&sort_by=primary_release_date.asc&primary_release_date.gte=$todayDate&page=1").first
                         }
 
                         listOf(
@@ -376,7 +399,7 @@ class KollyGameViewModel : ViewModel() {
                 }
                 
                 // Try watch?v= pattern as fallback
-                val watchRegex = "/watch\\?v=([a-zA-Z0-9_-]{11})".toRegex()
+                val watchRegex = "/watch\?v=([a-zA-Z0-9_-]{11})".toRegex()
                 val match2 = watchRegex.find(html)
                 val id2 = match2?.groups?.get(1)?.value
                 if (!id2.isNullOrEmpty()) {
@@ -494,10 +517,11 @@ class KollyGameViewModel : ViewModel() {
         _selectedPersonCredits.value = null
     }
 
-    private fun fetchMoviesFromApi(urlString: String): List<TmdbMovie> {
+    private fun fetchMoviesFromApi(urlString: String): Pair<List<TmdbMovie>, Int> {
         return try {
             val json = URL(urlString).openStream().bufferedReader().readText()
             val root = JSONObject(json)
+            val totalPages = root.optInt("total_pages", 1)
             val results = root.optJSONArray("results")
             val list = mutableListOf<TmdbMovie>()
             if (results != null) {
@@ -505,10 +529,10 @@ class KollyGameViewModel : ViewModel() {
                     list.add(TmdbMovie.fromJson(results.getJSONObject(i)))
                 }
             }
-            list
+            Pair(list, totalPages)
         } catch (e: Exception) {
             Log.e("KollyGameVM", "API fetch error: $urlString", e)
-            emptyList()
+            Pair(emptyList(), 1)
         }
     }
 
