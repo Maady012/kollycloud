@@ -705,12 +705,12 @@ class KollyGameViewModel : ViewModel() {
             val cachedSocialTrending = getCachedMovies(ctx, "social_trending")
             val cachedReviews = getCachedReviews(ctx, "audience_buzz")
 
-            val hasData = cachedTrending != null && cachedTopRated != null && cachedUpcoming != null
+            val hasData = !cachedTrending.isNullOrEmpty() && !cachedTopRated.isNullOrEmpty() && !cachedUpcoming.isNullOrEmpty()
             if (hasData) {
                 _kollywoodState.value = KollywoodUiState.Success(
-                    trending = cachedTrending!!,
-                    topRated = cachedTopRated!!,
-                    upcoming = cachedUpcoming!!,
+                    trending = cachedTrending,
+                    topRated = cachedTopRated,
+                    upcoming = cachedUpcoming,
                     isDemoMode = false
                 )
                 _nowRunningMovies.value = cachedNowRunning ?: emptyList()
