@@ -23,6 +23,8 @@ import java.util.Date
 import java.util.Locale
 
 
+data class KollyNewsFeedItem(val title: String, val link: String, val category: String)
+
 sealed interface KollywoodUiState {
     object Loading : KollywoodUiState
     data class Success(
@@ -193,6 +195,17 @@ class KollyGameViewModel : ViewModel() {
     var currentFilterPage = 1
     var isFilterPaginationExhausted = false
 
+    // Reddit lounge discussions
+    private val _redditDiscussionThreads = MutableStateFlow<List<KollyNewsFeedItem>>(emptyList())
+    val redditDiscussionThreads: StateFlow<List<KollyNewsFeedItem>> = _redditDiscussionThreads.asStateFlow()
+    
+    private val _redditLoading = MutableStateFlow(false)
+    val redditLoading: StateFlow<Boolean> = _redditLoading.asStateFlow()
+
+    // Global in-app PiP trailer states
+    val activeTrailerVideoId = MutableStateFlow<String?>(null)
+    val isTrailerMinimized = MutableStateFlow(false)
+
     // Map genres to TMDB genre IDs
     private val genreMap = mapOf(
         "Action" to 28L,
@@ -343,6 +356,77 @@ class KollyGameViewModel : ViewModel() {
         }
     }
 
+    fun fetchRedditDiscussions(movieTitle: String) {
+        viewModelScope.launch {
+            _redditLoading.value = true
+            try {
+                val encoded = java.net.URLEncoder.encode(movieTitle, "UTF-8")
+                val url = "https://www.reddit.com/r/kollywood/search.rss?q=$encoded&restrict_sr=on&sort=relevance&t=all"
+                val items = withContext(Dispatchers.IO) { parseRssFeed(url) }
+                _redditDiscussionThreads.value = items.take(5)
+            } catch (e: Exception) {
+                _redditDiscussionThreads.value = emptyList()
+            } finally {
+                _redditLoading.value = false
+            }
+        }
+    }
+
+    fun curateSearch(ctx: Context, prompt: String) {
+        val cleanPrompt = prompt.lowercase(Locale.getDefault())
+        
+        // Parse Decade/Year
+        var yearFilter = "All"
+        if (cleanPrompt.contains("90s") || cleanPrompt.contains("1990")) yearFilter = "199"
+        else if (cleanPrompt.contains("80s") || cleanPrompt.contains("1980")) yearFilter = "198"
+        else if (cleanPrompt.contains("2000s")) yearFilter = "200"
+        else if (cleanPrompt.contains("recent") || cleanPrompt.contains("202")) yearFilter = "202"
+        
+        // Parse Genre
+        var genreFilter = "All"
+        if (cleanPrompt.contains("action")) genreFilter = "Action"
+        else if (cleanPrompt.contains("comedy")) genreFilter = "Comedy"
+        else if (cleanPrompt.contains("thriller") || cleanPrompt.contains("gritty") || cleanPrompt.contains("dark")) genreFilter = "Thriller"
+        else if (cleanPrompt.contains("romance") || cleanPrompt.contains("love")) genreFilter = "Romance"
+        else if (cleanPrompt.contains("family")) genreFilter = "Family"
+        else if (cleanPrompt.contains("sci-fi") || cleanPrompt.contains("scifi")) genreFilter = "Sci-Fi"
+        else if (cleanPrompt.contains("horror")) genreFilter = "Horror"
+        else if (cleanPrompt.contains("drama")) genreFilter = "Drama"
+        
+        // Parse Actor
+        var actorFilter: TmdbCastMember? = null
+        if (cleanPrompt.contains("kamal") || cleanPrompt.contains("haasan")) {
+            actorFilter = TmdbCastMember(30784L, "Kamal Haasan", null, null)
+        } else if (cleanPrompt.contains("rajini") || cleanPrompt.contains("superstar")) {
+            actorFilter = TmdbCastMember(819L, "Rajinikanth", null, null)
+        } else if (cleanPrompt.contains("vijay") || cleanPrompt.contains("thalapathy")) {
+            actorFilter = TmdbCastMember(58197L, "Vijay", null, null)
+        } else if (cleanPrompt.contains("ajith") || cleanPrompt.contains("thala")) {
+            actorFilter = TmdbCastMember(75510L, "Ajith Kumar", null, null)
+        } else if (cleanPrompt.contains("suriya")) {
+            actorFilter = TmdbCastMember(118595L, "Suriya", null, null)
+        } else if (cleanPrompt.contains("dhanush")) {
+            actorFilter = TmdbCastMember(1251347L, "Dhanush", null, null)
+        } else if (cleanPrompt.contains("vikram") || cleanPrompt.contains("chiyaan")) {
+            actorFilter = TmdbCastMember(173873L, "Vikram", null, null)
+        }
+        
+        // Parse rating threshold
+        var ratingFilter = "All"
+        if (cleanPrompt.contains("high rating") || cleanPrompt.contains("best") || cleanPrompt.contains("top")) {
+            ratingFilter = "7.5+"
+        } else if (cleanPrompt.contains("underrated")) {
+            ratingFilter = "6.0+"
+        }
+        
+        selectedGenre.value = genreFilter
+        selectedYear.value = yearFilter
+        selectedRating.value = ratingFilter
+        selectedArtist.value = actorFilter
+        
+        searchAndFilterMovies(ctx)
+    }
+
     fun searchArtists(ctx: Context, query: String) {
         viewModelScope.launch {
             val q = query.trim()
@@ -470,8 +554,6 @@ class KollyGameViewModel : ViewModel() {
         val saved = prefs.getString("tmdb_api_key_secure", "") ?: ""
         return saved.ifBlank { "6a466e5332dd8e436b7925a5c9f02ad2" }
     }
-
-    private data class KollyNewsFeedItem(val title: String, val link: String, val category: String)
 
     private fun parseRssFeed(urlString: String): List<KollyNewsFeedItem> {
         val list = mutableListOf<KollyNewsFeedItem>()
@@ -810,21 +892,27 @@ class KollyGameViewModel : ViewModel() {
                     
                     coroutineScope {
                         val trendingDeferred = async(Dispatchers.IO) {
-                            fetchMoviesFromApi("https://api.themoviedb.org/3/discover/movie?api_key=$apiKey&with_original_language=ta&region=IN&sort_by=popularity.desc&vote_count.gte=20&page=1")
+                            fetchMoviesFromApi("https://api.themoviedb.org/3/discover/movie?api_key=$apiKey&with_original_language=ta&region=IN&sort_by=popularity.desc&vote_count.gte=3&page=1")
                         }
                         val topRatedDeferred = async(Dispatchers.IO) {
-                            fetchMoviesFromApi("https://api.themoviedb.org/3/discover/movie?api_key=$apiKey&with_original_language=ta&region=IN&sort_by=vote_average.desc&vote_count.gte=50&page=1")
+                            fetchMoviesFromApi("https://api.themoviedb.org/3/discover/movie?api_key=$apiKey&with_original_language=ta&region=IN&sort_by=vote_average.desc&vote_count.gte=12&page=1")
                         }
                         val upcomingDeferred = async(Dispatchers.IO) {
-                            fetchMoviesFromApi("https://api.themoviedb.org/3/discover/movie?api_key=$apiKey&with_original_language=ta&region=IN&sort_by=popularity.desc&primary_release_date.gte=$todayDate&page=1")
+                            fetchMoviesFromApi("https://api.themoviedb.org/3/discover/movie?api_key=$apiKey&with_original_language=ta&region=IN&sort_by=primary_release_date.asc&primary_release_date.gte=$todayDate&page=1")
                         }
                         val nowRunningDeferred = async(Dispatchers.IO) {
                             fetchNowRunningMovies(apiKey)
                         }
 
+                        val calendar = java.util.Calendar.getInstance()
+                        calendar.add(java.util.Calendar.DAY_OF_YEAR, 365)
+                        val oneYearLater = SimpleDateFormat("yyyy-MM-dd", Locale.getDefault()).format(calendar.time)
+
                         val trending = trendingDeferred.await().ifEmpty { getCuratedTrendingMovies() }
                         val topRated = topRatedDeferred.await().ifEmpty { getCuratedTopRatedMovies() }
-                        val upcoming = upcomingDeferred.await().ifEmpty { getCuratedUpcomingMovies() }
+                        val upcoming = upcomingDeferred.await().filter { movie ->
+                            movie.releaseDate != null && movie.releaseDate <= oneYearLater
+                        }.ifEmpty { getCuratedUpcomingMovies() }
                         val nowRunning = nowRunningDeferred.await()
 
                         val socialTrending = fetchSocialTrendingMovies(ctx, apiKey)
@@ -905,18 +993,13 @@ class KollyGameViewModel : ViewModel() {
     }
 
     fun fetchMovieTrailer(ctx: Context, movieId: Long, movieTitle: String) {
-        if (_movieTrailers.value.containsKey(movieId)) {
-            val current = _movieTrailers.value[movieId]
-            if (current != null && !current.startsWith("search:") && current.isNotEmpty()) {
-                return
-            }
-        }
-
         viewModelScope.launch {
             try {
                 if (curatedTrailers.containsKey(movieId)) {
                     val key = curatedTrailers[movieId]!!
                     _movieTrailers.value = _movieTrailers.value + (movieId to key)
+                    activeTrailerVideoId.value = key
+                    isTrailerMinimized.value = false
                     return@launch
                 }
 
@@ -940,14 +1023,22 @@ class KollyGameViewModel : ViewModel() {
 
                 if (trailerKey != null && trailerKey.isNotEmpty()) {
                     _movieTrailers.value = _movieTrailers.value + (movieId to trailerKey)
+                    activeTrailerVideoId.value = trailerKey
+                    isTrailerMinimized.value = false
                 } else {
                     val foundId = searchYouTubeVideoId("$movieTitle official trailer")
-                    _movieTrailers.value = _movieTrailers.value + (movieId to (foundId ?: ""))
+                    val key = foundId ?: "search:$movieTitle trailer"
+                    _movieTrailers.value = _movieTrailers.value + (movieId to key)
+                    activeTrailerVideoId.value = key
+                    isTrailerMinimized.value = false
                 }
             } catch (e: Exception) {
                 Log.e("KollyGameVM", "Failed to fetch trailer for $movieTitle", e)
                 val foundId = searchYouTubeVideoId("$movieTitle official trailer")
-                _movieTrailers.value = _movieTrailers.value + (movieId to (foundId ?: ""))
+                val key = foundId ?: "search:$movieTitle trailer"
+                _movieTrailers.value = _movieTrailers.value + (movieId to key)
+                activeTrailerVideoId.value = key
+                isTrailerMinimized.value = false
             }
         }
     }
