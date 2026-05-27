@@ -26,6 +26,13 @@ import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
+import androidx.compose.foundation.pager.HorizontalPager
+import androidx.compose.foundation.pager.rememberPagerState
+import androidx.compose.material3.pulltorefresh.PullToRefreshBox
+import androidx.compose.material3.pulltorefresh.rememberPullToRefreshState
+import androidx.compose.foundation.lazy.grid.LazyVerticalGrid
+import androidx.compose.foundation.lazy.grid.GridCells
+import androidx.compose.foundation.lazy.grid.items
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.*
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
@@ -384,7 +391,12 @@ fun KollywoodScreen(
     val watchedListMovies by viewModel.watchedListMovies.collectAsState()
     val context = LocalContext.current
 
-val searchQuery by viewModel.searchQuery.collectAsState()
+    val socialTrendingMovies by viewModel.socialTrendingMovies.collectAsState()
+    val nowRunningMovies by viewModel.nowRunningMovies.collectAsState()
+    val audienceBuzz by viewModel.audienceBuzz.collectAsState()
+    var expandedReview by remember { mutableStateOf<TmdbReview?>(null) }
+
+    val searchQuery by viewModel.searchQuery.collectAsState()
     val selectedGenre by viewModel.selectedGenre.collectAsState()
     val selectedYear by viewModel.selectedYear.collectAsState()
     val selectedRating by viewModel.selectedRating.collectAsState()
@@ -453,7 +465,7 @@ val searchQuery by viewModel.searchQuery.collectAsState()
                         }
                         Spacer(modifier = Modifier.width(16.dp))
                         IconButton(
-                            onClick = { viewModel.fetchKollywoodMovies(context) },
+                            onClick = { viewModel.fetchKollywoodMovies(context, forceRefresh = true) },
                             modifier = Modifier.size(28.dp)
                         ) {
                             Icon(
@@ -641,426 +653,158 @@ val searchQuery by viewModel.searchQuery.collectAsState()
                     }
                 }
             } else {
-                when (val state = uiState) {
-                    is KollywoodUiState.Loading -> {
-                        Box(
-                            modifier = Modifier.fillMaxSize(),
-                            contentAlignment = Alignment.Center
-                        ) {
-                            CircularProgressIndicator(color = Color(0xFFFFD700))
+                val pullToRefreshState = rememberPullToRefreshState()
+                PullToRefreshBox(
+                    isRefreshing = isRefreshing,
+                    onRefresh = { viewModel.fetchKollywoodMovies(context, forceRefresh = true) },
+                    state = pullToRefreshState,
+                    modifier = Modifier.fillMaxSize()
+                ) {
+                    when (val state = uiState) {
+                        is KollywoodUiState.Loading -> {
+                            Box(
+                                modifier = Modifier.fillMaxSize(),
+                                contentAlignment = Alignment.Center
+                            ) {
+                                CircularProgressIndicator(color = Color(0xFFFFD700))
+                            }
                         }
-                    }
-                    is KollywoodUiState.Success -> {
-                        KollywoodCatalog(
-                            viewModel = viewModel,
-                            trending = state.trending,
-                            topRated = state.topRated,
-                            upcoming = state.upcoming,
-                            isDemoMode = state.isDemoMode,
-                            errorMessage = null,
-                            onMovieClick = { selectedMovie = it },
-                            onRetryClick = { viewModel.fetchKollywoodMovies(context) }
-                        )
-                    }
-                    is KollywoodUiState.Error -> {
-                        if (state.fallbackTrending != null) {
+                        is KollywoodUiState.Success -> {
                             KollywoodCatalog(
                                 viewModel = viewModel,
-                                trending = state.fallbackTrending,
-                                topRated = state.fallbackTopRated ?: emptyList(),
-                                upcoming = state.fallbackUpcoming ?: emptyList(),
-                                isDemoMode = true,
-                                errorMessage = state.message,
+                                trending = state.trending,
+                                topRated = state.topRated,
+                                upcoming = state.upcoming,
+                                socialTrending = socialTrendingMovies,
+                                nowRunning = nowRunningMovies,
+                                audienceBuzz = audienceBuzz,
+                                isDemoMode = state.isDemoMode,
+                                errorMessage = null,
                                 onMovieClick = { selectedMovie = it },
-                                onRetryClick = { viewModel.fetchKollywoodMovies(context) }
-                            )
-                        } else {
-                            ErrorStateScreen(
-                                message = state.message,
-                                onRetry = { viewModel.fetchKollywoodMovies(context) }
+                                onPlayClick = onPlayMovieClick,
+                                onRetryClick = { viewModel.fetchKollywoodMovies(context, forceRefresh = true) },
+                                onReviewClick = { expandedReview = it }
                             )
                         }
-                    }
-                }
-            }
-        }
-
-        AnimatedVisibility(
-            visible = showWatchlistOverlay,
-            enter = androidx.compose.animation.slideInVertically(
-                initialOffsetY = { it },
-                animationSpec = androidx.compose.animation.core.tween(durationMillis = 450, easing = androidx.compose.animation.core.EaseOutQuart)
-            ) + fadeIn(animationSpec = androidx.compose.animation.core.tween(450)),
-            exit = androidx.compose.animation.slideOutVertically(
-                targetOffsetY = { it },
-                animationSpec = androidx.compose.animation.core.tween(durationMillis = 350, easing = androidx.compose.animation.core.EaseInQuart)
-            ) + fadeOut(animationSpec = androidx.compose.animation.core.tween(350)),
-            modifier = Modifier.fillMaxSize()
-        ) {
-            Surface(
-                modifier = Modifier.fillMaxSize(),
-                color = Color(0xFF0C0C12),
-                contentColor = Color.White
-            ) {
-                Column(
-                    modifier = Modifier
-                        .fillMaxSize()
-                        .statusBarsPadding()
-                ) {
-                    // Header
-                    Row(
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .padding(horizontal = 20.dp, vertical = 14.dp),
-                        verticalAlignment = Alignment.CenterVertically,
-                        horizontalArrangement = Arrangement.SpaceBetween
-                    ) {
-                        Row(verticalAlignment = Alignment.CenterVertically) {
-                            IconButton(
-                                onClick = { showWatchlistOverlay = false },
-                                modifier = Modifier.background(Color.White.copy(alpha = 0.05f), RoundedCornerShape(20.dp))
-                            ) {
-                                Icon(
-                                    imageVector = Icons.AutoMirrored.Filled.ArrowBack,
-                                    contentDescription = "Back",
-                                    tint = Color(0xFFFFD700)
+                        is KollywoodUiState.Error -> {
+                            if (state.fallbackTrending != null) {
+                                KollywoodCatalog(
+                                    viewModel = viewModel,
+                                    trending = state.fallbackTrending,
+                                    topRated = state.fallbackTopRated ?: emptyList(),
+                                    upcoming = state.fallbackUpcoming ?: emptyList(),
+                                    socialTrending = socialTrendingMovies,
+                                    nowRunning = nowRunningMovies,
+                                    audienceBuzz = audienceBuzz,
+                                    isDemoMode = true,
+                                    errorMessage = state.message,
+                                    onMovieClick = { selectedMovie = it },
+                                    onPlayClick = onPlayMovieClick,
+                                    onRetryClick = { viewModel.fetchKollywoodMovies(context, forceRefresh = true) },
+                                    onReviewClick = { expandedReview = it }
                                 )
-                            }
-                            Spacer(modifier = Modifier.width(12.dp))
-                            Text(
-                                text = "📂 My Watchlist",
-                                color = Color.White,
-                                fontSize = 20.sp,
-                                fontWeight = FontWeight.Bold
-                            )
-                        }
-                    }
-
-                    if (watchlistMovies.isEmpty()) {
-                        Box(
-                            modifier = Modifier
-                                .fillMaxWidth()
-                                .weight(1f),
-                            contentAlignment = Alignment.Center
-                        ) {
-                            Column(horizontalAlignment = Alignment.CenterHorizontally) {
-                                Icon(
-                                    imageVector = Icons.Default.FavoriteBorder,
-                                    contentDescription = null,
-                                    tint = Color.Gray,
-                                    modifier = Modifier.size(64.dp)
-                                )
-                                Spacer(modifier = Modifier.height(12.dp))
-                                Text("Your watchlist is empty.", color = Color.Gray, fontSize = 14.sp)
-                            }
-                        }
-                    } else {
-                        // 2-column grid for watchlist
-                        val chunkedWatchlist = watchlistMovies.chunked(2)
-                        Column(
-                            modifier = Modifier
-                                .fillMaxWidth()
-                                .weight(1f)
-                                .verticalScroll(rememberScrollState())
-                                .padding(horizontal = 16.dp)
-                                .padding(bottom = 40.dp),
-                            verticalArrangement = Arrangement.spacedBy(16.dp)
-                        ) {
-                            chunkedWatchlist.forEach { pair ->
-                                Row(
-                                    modifier = Modifier.fillMaxWidth(),
-                                    horizontalArrangement = Arrangement.spacedBy(16.dp)
-                                ) {
-                                    Box(modifier = Modifier.weight(1f)) {
-                                        MovieRowCard(
-                                            movie = pair[0],
-                                            onClick = {
-                                                selectedMovie = pair[0]
-                                                showWatchlistOverlay = false
-                                            },
-                                            modifier = Modifier.fillMaxWidth(),
-                                            isWatchlisted = true,
-                                            isWatched = watchedMovies.contains(pair[0].id),
-                                            onWatchlistToggle = { viewModel.removeFromWatchlist(context, pair[0]) },
-                                            onWatchedToggle = { viewModel.toggleWatchedMovie(context, pair[0]) }
-                                        )
-                                    }
-                                    Box(modifier = Modifier.weight(1f)) {
-                                        if (pair.size > 1) {
-                                            MovieRowCard(
-                                                movie = pair[1],
-                                                onClick = {
-                                                    selectedMovie = pair[1]
-                                                    showWatchlistOverlay = false
-                                                },
-                                                modifier = Modifier.fillMaxWidth(),
-                                                isWatchlisted = true,
-                                                isWatched = watchedMovies.contains(pair[1].id),
-                                                onWatchlistToggle = { viewModel.removeFromWatchlist(context, pair[1]) },
-                                                onWatchedToggle = { viewModel.toggleWatchedMovie(context, pair[1]) }
-                                            )
-                                        } else {
-                                            Spacer(modifier = Modifier.fillMaxWidth())
-                                        }
-                                    }
-                                }
-                            }
-                        }
-                    }
-                }
-            }
-        }
-
-        AnimatedVisibility(
-            visible = showWatchedOverlay,
-            enter = androidx.compose.animation.slideInVertically(
-                initialOffsetY = { it },
-                animationSpec = androidx.compose.animation.core.tween(durationMillis = 450, easing = androidx.compose.animation.core.EaseOutQuart)
-            ) + fadeIn(animationSpec = androidx.compose.animation.core.tween(450)),
-            exit = androidx.compose.animation.slideOutVertically(
-                targetOffsetY = { it },
-                animationSpec = androidx.compose.animation.core.tween(durationMillis = 350, easing = androidx.compose.animation.core.EaseInQuart)
-            ) + fadeOut(animationSpec = androidx.compose.animation.core.tween(350)),
-            modifier = Modifier.fillMaxSize()
-        ) {
-            Surface(
-                modifier = Modifier.fillMaxSize(),
-                color = Color(0xFF0C0C12),
-                contentColor = Color.White
-            ) {
-                Column(
-                    modifier = Modifier
-                        .fillMaxSize()
-                        .statusBarsPadding()
-                ) {
-                    // Header
-                    Row(
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .padding(horizontal = 20.dp, vertical = 14.dp),
-                        verticalAlignment = Alignment.CenterVertically,
-                        horizontalArrangement = Arrangement.SpaceBetween
-                    ) {
-                        Row(verticalAlignment = Alignment.CenterVertically) {
-                            IconButton(
-                                onClick = { showWatchedOverlay = false },
-                                modifier = Modifier.background(Color.White.copy(alpha = 0.05f), RoundedCornerShape(20.dp))
-                            ) {
-                                Icon(
-                                    imageVector = Icons.AutoMirrored.Filled.ArrowBack,
-                                    contentDescription = "Back",
-                                    tint = Color(0xFFFFD700)
-                                )
-                            }
-                            Spacer(modifier = Modifier.width(12.dp))
-                            Text(
-                                text = "🎬 Watched Movies",
-                                color = Color.White,
-                                fontSize = 20.sp,
-                                fontWeight = FontWeight.Bold
-                            )
-                        }
-                    }
-
-                    if (watchedListMovies.isEmpty()) {
-                        Box(
-                            modifier = Modifier
-                                .fillMaxWidth()
-                                .weight(1f),
-                            contentAlignment = Alignment.Center
-                        ) {
-                            Column(horizontalAlignment = Alignment.CenterHorizontally) {
-                                EyeIcon(
-                                    isWatched = false,
-                                    modifier = Modifier.size(64.dp)
-                                )
-                                Spacer(modifier = Modifier.height(12.dp))
-                                Text("Your watched list is empty.", color = Color.Gray, fontSize = 14.sp)
-                            }
-                        }
-                    } else {
-                        // 2-column grid for watched list
-                        val chunkedWatched = watchedListMovies.chunked(2)
-                        Column(
-                            modifier = Modifier
-                                .fillMaxWidth()
-                                .weight(1f)
-                                .verticalScroll(rememberScrollState())
-                                .padding(horizontal = 16.dp)
-                                .padding(bottom = 40.dp),
-                            verticalArrangement = Arrangement.spacedBy(16.dp)
-                        ) {
-                            chunkedWatched.forEach { pair ->
-                                Row(
-                                    modifier = Modifier.fillMaxWidth(),
-                                    horizontalArrangement = Arrangement.spacedBy(16.dp)
-                                ) {
-                                    Box(modifier = Modifier.weight(1f)) {
-                                        MovieRowCard(
-                                            movie = pair[0],
-                                            onClick = {
-                                                selectedMovie = pair[0]
-                                                showWatchedOverlay = false
-                                            },
-                                            modifier = Modifier.fillMaxWidth(),
-                                            isWatchlisted = viewModel.isInWatchlist(pair[0]),
-                                            isWatched = true,
-                                            onWatchlistToggle = {
-                                                if (viewModel.isInWatchlist(pair[0])) {
-                                                    viewModel.removeFromWatchlist(context, pair[0])
-                                                } else {
-                                                    viewModel.addToWatchlist(context, pair[0])
-                                                }
-                                            },
-                                            onWatchedToggle = { viewModel.toggleWatchedMovie(context, pair[0]) }
-                                        )
-                                    }
-                                    Box(modifier = Modifier.weight(1f)) {
-                                        if (pair.size > 1) {
-                                            MovieRowCard(
-                                                movie = pair[1],
-                                                onClick = {
-                                                    selectedMovie = pair[1]
-                                                    showWatchedOverlay = false
-                                                },
-                                                modifier = Modifier.fillMaxWidth(),
-                                                isWatchlisted = viewModel.isInWatchlist(pair[1]),
-                                                isWatched = true,
-                                                onWatchlistToggle = {
-                                                    if (viewModel.isInWatchlist(pair[1])) {
-                                                        viewModel.removeFromWatchlist(context, pair[1])
-                                                    } else {
-                                                        viewModel.addToWatchlist(context, pair[1])
-                                                    }
-                                                },
-                                                onWatchedToggle = { viewModel.toggleWatchedMovie(context, pair[1]) }
-                                            )
-                                        } else {
-                                            Spacer(modifier = Modifier.fillMaxWidth())
-                                        }
-                                    }
-                                }
-                            }
-                        }
-                    }
-                }
-            }
-        }
-        activeFilterDialog?.let { type ->
-            when (type) {
-                FilterType.GENRE -> {
-                    FilterSelectionDialog(
-                        title = "Select Genre",
-                        searchPlaceholder = "Search genres...",
-                        items = listOf("All", "Action", "Adventure", "Animation", "Comedy", "Crime", "Drama", "Family", "Fantasy", "History", "Horror", "Music", "Mystery", "Romance", "Sci-Fi", "Thriller"),
-                        selectedItem = selectedGenre,
-                        onItemSelected = {
-                            viewModel.selectedGenre.value = it
-                            viewModel.searchAndFilterMovies(context)
-                        },
-                        onDismiss = { activeFilterDialog = null },
-                        itemLabel = { it }
-                    )
-                }
-                FilterType.YEAR -> {
-                    FilterSelectionDialog(
-                        title = "Select Release Year",
-                        searchPlaceholder = "Search release years...",
-                        items = listOf("All", "2026", "2025", "2024", "2023", "2022", "2021", "2020", "2019", "2018", "2017", "2016", "2015", "2012", "2010", "2008", "2005", "2003", "2000", "1995", "1990", "1980"),
-                        selectedItem = selectedYear,
-                        onItemSelected = {
-                            viewModel.selectedYear.value = it
-                            viewModel.searchAndFilterMovies(context)
-                        },
-                        onDismiss = { activeFilterDialog = null },
-                        itemLabel = { it }
-                    )
-                }
-                FilterType.RATING -> {
-                    FilterSelectionDialog(
-                        title = "Select Minimum Rating",
-                        searchPlaceholder = "Search ratings...",
-                        items = listOf("All", "9.0+", "8.0+", "7.0+", "6.0+", "5.0+", "4.0+"),
-                        selectedItem = selectedRating,
-                        onItemSelected = {
-                            viewModel.selectedRating.value = it
-                            viewModel.searchAndFilterMovies(context)
-                        },
-                        onDismiss = { activeFilterDialog = null },
-                        itemLabel = { it }
-                    )
-                }
-                FilterType.LANGUAGE -> {
-                    FilterSelectionDialog(
-                        title = "Select Audio Language",
-                        searchPlaceholder = "Search audio languages...",
-                        items = listOf("Tamil", "Telugu", "Malayalam", "Hindi", "English"),
-                        selectedItem = reverseLangMap[selectedLanguage] ?: "Tamil",
-                        onItemSelected = {
-                            val code = langMap[it] ?: "ta"
-                            viewModel.selectedLanguage.value = code
-                            viewModel.searchAndFilterMovies(context)
-                        },
-                        onDismiss = { activeFilterDialog = null },
-                        itemLabel = { it }
-                    )
-                }
-                FilterType.SORT -> {
-                    FilterSelectionDialog(
-                        title = "Select Sort Order",
-                        searchPlaceholder = "Search sorting criteria...",
-                        items = listOf("Popularity", "Rating", "Release Date", "Title A-Z"),
-                        selectedItem = selectedSortOrder,
-                        onItemSelected = {
-                            viewModel.selectedSortOrder.value = it
-                            viewModel.searchAndFilterMovies(context)
-                        },
-                        onDismiss = { activeFilterDialog = null },
-                        itemLabel = { it }
-                    )
-                }
-                FilterType.ARTIST -> {
-                    val artistItems = remember(artistSearchResults) {
-                        val base = if (artistSearchResults.isEmpty()) curatedArtists else artistSearchResults
-                        listOf(TmdbCastMember(-1L, "All Artists", null, null)) + base
-                    }
-                    FilterSelectionDialog(
-                        title = "Select Cast / Crew",
-                        searchPlaceholder = "Search actor or director...",
-                        items = artistItems,
-                        selectedItem = selectedArtist,
-                        onItemSelected = {
-                            if (it.id == -1L) {
-                                viewModel.selectedArtist.value = null
                             } else {
-                                viewModel.selectedArtist.value = it
-                            }
-                            viewModel.searchAndFilterMovies(context)
-                        },
-                        onDismiss = { 
-                            activeFilterDialog = null
-                            viewModel.searchArtists(context, "")
-                        },
-                        itemLabel = { it.name },
-                        onSearchQueryChange = { query ->
-                            viewModel.searchArtists(context, query)
-                        },
-                        isSearching = isSearchingArtists,
-                        itemImage = { artist ->
-                            if (artist.id != -1L) {
-                                AsyncImage(
-                                    model = artist.fullProfileUrl ?: "https://images.unsplash.com/photo-1534528741775-53994a69daeb?w=100&auto=format&fit=crop&q=80",
-                                    contentDescription = artist.name,
-                                    contentScale = ContentScale.Crop,
+                                Box(
                                     modifier = Modifier
-                                        .size(36.dp)
-                                        .clip(RoundedCornerShape(18.dp))
-                                )
+                                        .fillMaxSize()
+                                        .verticalScroll(rememberScrollState()),
+                                    contentAlignment = Alignment.Center
+                                ) {
+                                    ErrorStateScreen(
+                                        message = state.message,
+                                        onRetry = { viewModel.fetchKollywoodMovies(context, forceRefresh = true) }
+                                    )
+                                }
                             }
                         }
-                    )
+                    }
                 }
             }
+        }
+
+        ItemOverlay(
+            visible = showWatchlistOverlay,
+            title = "📂 My Watchlist",
+            emptyText = "Your watchlist is empty.",
+            emptyIcon = {
+                Icon(
+                    imageVector = Icons.Default.FavoriteBorder,
+                    contentDescription = null,
+                    tint = Color.Gray,
+                    modifier = Modifier.size(64.dp)
+                )
+            },
+            movies = watchlistMovies,
+            viewModel = viewModel,
+            onBack = { showWatchlistOverlay = false },
+            onMovieClick = { movie ->
+                selectedMovie = movie
+                showWatchlistOverlay = false
+            }
+        )
+
+        ItemOverlay(
+            visible = showWatchedOverlay,
+            title = "🎬 Watched Movies",
+            emptyText = "Your watched list is empty.",
+            emptyIcon = {
+                EyeIcon(
+                    isWatched = false,
+                    modifier = Modifier.size(64.dp)
+                )
+            },
+            movies = watchedListMovies,
+            viewModel = viewModel,
+            onBack = { showWatchedOverlay = false },
+            onMovieClick = { movie ->
+                selectedMovie = movie
+                showWatchedOverlay = false
+            }
+        )
+
+        expandedReview?.let { review ->
+            AlertDialog(
+                onDismissRequest = { expandedReview = null },
+                title = {
+                    Column {
+                        Text(
+                            text = review.movieTitle,
+                            color = Color.White,
+                            fontSize = 18.sp,
+                            fontWeight = FontWeight.Bold
+                        )
+                        Spacer(modifier = Modifier.height(4.dp))
+                        Text(
+                            text = "Review by ${review.author}",
+                            color = Color(0xFFFFD700),
+                            fontSize = 12.sp,
+                            fontWeight = FontWeight.SemiBold
+                        )
+                    }
+                },
+                text = {
+                    Column(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .verticalScroll(rememberScrollState())
+                            .heightIn(max = 300.dp)
+                    ) {
+                        Text(
+                            text = review.content,
+                            color = Color(0xFFC5C5D2),
+                            fontSize = 13.sp,
+                            lineHeight = 20.sp
+                        )
+                    }
+                },
+                confirmButton = {
+                    TextButton(onClick = { expandedReview = null }) {
+                        Text("Close", color = Color(0xFFFFD700), fontWeight = FontWeight.Bold)
+                    }
+                },
+                containerColor = Color(0xFF0F0F16),
+                shape = RoundedCornerShape(16.dp)
+            )
         }
 
         val movieToShow = selectedMovie
@@ -1106,10 +850,15 @@ fun KollywoodCatalog(
     trending: List<TmdbMovie>,
     topRated: List<TmdbMovie>,
     upcoming: List<TmdbMovie>,
+    socialTrending: List<TmdbMovie>,
+    nowRunning: List<TmdbMovie>,
+    audienceBuzz: List<TmdbReview>,
     isDemoMode: Boolean,
     errorMessage: String?,
     onMovieClick: (TmdbMovie) -> Unit,
-    onRetryClick: () -> Unit
+    onPlayClick: (TmdbMovie) -> Unit,
+    onRetryClick: () -> Unit,
+    onReviewClick: (TmdbReview) -> Unit
 ) {
     val scrollState = rememberScrollState()
     val watchlistMovies by viewModel.watchlist.collectAsState()
@@ -1168,19 +917,528 @@ fun KollywoodCatalog(
 
         Spacer(modifier = Modifier.height(8.dp))
 
+        // Spotlight Pager Carousel
+        if (socialTrending.isNotEmpty()) {
+            Box(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(horizontal = 16.dp, vertical = 8.dp)
+            ) {
+                SpotlightPager(
+                    movies = socialTrending.take(5),
+                    viewModel = viewModel,
+                    onMovieClick = onMovieClick,
+                    onPlayClick = onPlayClick
+                )
+            }
+            Spacer(modifier = Modifier.height(16.dp))
+        }
+
         // Watchlist Horizontal Carousel Section
         if (watchlistMovies.isNotEmpty()) {
             MovieRowSection(title = "📂 My Watchlist", movies = watchlistMovies, viewModel = viewModel, onMovieClick = onMovieClick)
             Spacer(modifier = Modifier.height(16.dp))
         }
 
+        // 1. Trending in Socials & Discussions
+        if (socialTrending.isNotEmpty()) {
+            MovieRowSection(title = "🔥 Trending in Socials & Discussions", movies = socialTrending, viewModel = viewModel, onMovieClick = onMovieClick)
+            Spacer(modifier = Modifier.height(16.dp))
+        }
+
+        // 2. Now Playing in Theaters
+        if (nowRunning.isNotEmpty()) {
+            MovieRowSection(title = "🎬 Now Playing in Theaters", movies = nowRunning, viewModel = viewModel, onMovieClick = onMovieClick)
+            Spacer(modifier = Modifier.height(16.dp))
+        }
+
+        // 3. Trending Tamil Movies
         MovieRowSection(title = "🔥 Trending Tamil Movies", movies = trending, viewModel = viewModel, onMovieClick = onMovieClick)
         Spacer(modifier = Modifier.height(16.dp))
+
+        // 4. Top Rated Kollywood
         MovieRowSection(title = "⭐ Top Rated Kollywood", movies = topRated, viewModel = viewModel, onMovieClick = onMovieClick)
         Spacer(modifier = Modifier.height(16.dp))
+
+        // 5. Upcoming Tamil Releases
         MovieRowSection(title = "📅 Upcoming Tamil Releases", movies = upcoming, viewModel = viewModel, onMovieClick = onMovieClick)
+        Spacer(modifier = Modifier.height(16.dp))
+
+        // 6. Audience Buzz
+        if (audienceBuzz.isNotEmpty()) {
+            AudienceBuzzRow(reviews = audienceBuzz, onReviewClick = onReviewClick)
+            Spacer(modifier = Modifier.height(16.dp))
+        }
 
         Spacer(modifier = Modifier.height(80.dp))
+    }
+}
+
+@Composable
+fun ItemOverlay(
+    visible: Boolean,
+    title: String,
+    emptyText: String,
+    emptyIcon: @Composable () -> Unit,
+    movies: List<TmdbMovie>,
+    viewModel: KollyGameViewModel,
+    onBack: () -> Unit,
+    onMovieClick: (TmdbMovie) -> Unit
+) {
+    val context = LocalContext.current
+    val watchedMovies by viewModel.watchedMovies.collectAsState()
+
+    AnimatedVisibility(
+        visible = visible,
+        enter = androidx.compose.animation.slideInVertically(
+            initialOffsetY = { it },
+            animationSpec = androidx.compose.animation.core.tween(durationMillis = 450, easing = androidx.compose.animation.core.EaseOutQuart)
+        ) + fadeIn(animationSpec = androidx.compose.animation.core.tween(450)),
+        exit = androidx.compose.animation.slideOutVertically(
+            targetOffsetY = { it },
+            animationSpec = androidx.compose.animation.core.tween(durationMillis = 350, easing = androidx.compose.animation.core.EaseInQuart)
+        ) + fadeOut(animationSpec = androidx.compose.animation.core.tween(350)),
+        modifier = Modifier.fillMaxSize()
+    ) {
+        Surface(
+            modifier = Modifier.fillMaxSize(),
+            color = Color(0xFF0C0C12),
+            contentColor = Color.White
+        ) {
+            Column(
+                modifier = Modifier
+                    .fillMaxSize()
+                    .statusBarsPadding()
+            ) {
+                // Header
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(horizontal = 20.dp, vertical = 14.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.SpaceBetween
+                ) {
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        IconButton(
+                            onClick = onBack,
+                            modifier = Modifier.background(Color.White.copy(alpha = 0.05f), RoundedCornerShape(20.dp))
+                        ) {
+                            Icon(
+                                imageVector = Icons.AutoMirrored.Filled.ArrowBack,
+                                contentDescription = "Back",
+                                tint = Color(0xFFFFD700)
+                            )
+                        }
+                        Spacer(modifier = Modifier.width(12.dp))
+                        Text(
+                            text = title,
+                            color = Color.White,
+                            fontSize = 20.sp,
+                            fontWeight = FontWeight.Bold
+                        )
+                    }
+                }
+
+                if (movies.isEmpty()) {
+                    Box(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .weight(1f),
+                        contentAlignment = Alignment.Center
+                    ) {
+                        Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                            emptyIcon()
+                            Spacer(modifier = Modifier.height(12.dp))
+                            Text(emptyText, color = Color.Gray, fontSize = 14.sp)
+                        }
+                    }
+                } else {
+                    // 2-column grid
+                    val chunked = movies.chunked(2)
+                    Column(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .weight(1f)
+                            .verticalScroll(rememberScrollState())
+                            .padding(horizontal = 16.dp)
+                            .padding(bottom = 40.dp),
+                        verticalArrangement = Arrangement.spacedBy(16.dp)
+                    ) {
+                        chunked.forEach { pair ->
+                            Row(
+                                modifier = Modifier.fillMaxWidth(),
+                                horizontalArrangement = Arrangement.spacedBy(16.dp)
+                            ) {
+                                Box(modifier = Modifier.weight(1f)) {
+                                    val isMovieWatchlisted = viewModel.isInWatchlist(pair[0])
+                                    val isMovieWatched = watchedMovies.contains(pair[0].id)
+                                    MovieRowCard(
+                                        movie = pair[0],
+                                        onClick = {
+                                            onMovieClick(pair[0])
+                                        },
+                                        modifier = Modifier.fillMaxWidth(),
+                                        isWatchlisted = isMovieWatchlisted,
+                                        isWatched = isMovieWatched,
+                                        onWatchlistToggle = {
+                                            if (isMovieWatchlisted) {
+                                                viewModel.removeFromWatchlist(context, pair[0])
+                                            } else {
+                                                viewModel.addToWatchlist(context, pair[0])
+                                            }
+                                        },
+                                        onWatchedToggle = { viewModel.toggleWatchedMovie(context, pair[0]) }
+                                    )
+                                }
+                                Box(modifier = Modifier.weight(1f)) {
+                                    if (pair.size > 1) {
+                                        val isMovieWatchlisted = viewModel.isInWatchlist(pair[1])
+                                        val isMovieWatched = watchedMovies.contains(pair[1].id)
+                                        MovieRowCard(
+                                            movie = pair[1],
+                                            onClick = {
+                                                onMovieClick(pair[1])
+                                            },
+                                            modifier = Modifier.fillMaxWidth(),
+                                            isWatchlisted = isMovieWatchlisted,
+                                            isWatched = isMovieWatched,
+                                            onWatchlistToggle = {
+                                                if (isMovieWatchlisted) {
+                                                    viewModel.removeFromWatchlist(context, pair[1])
+                                                } else {
+                                                    viewModel.addToWatchlist(context, pair[1])
+                                                }
+                                            },
+                                            onWatchedToggle = { viewModel.toggleWatchedMovie(context, pair[1]) }
+                                        )
+                                    } else {
+                                        Spacer(modifier = Modifier.fillMaxWidth())
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+}
+
+@Composable
+fun SpotlightPager(
+    movies: List<TmdbMovie>,
+    viewModel: KollyGameViewModel,
+    onMovieClick: (TmdbMovie) -> Unit,
+    onPlayClick: (TmdbMovie) -> Unit
+) {
+    if (movies.isEmpty()) return
+
+    val context = LocalContext.current
+    val pagerState = rememberPagerState(pageCount = { movies.size })
+
+    // Auto-scroll logic
+    LaunchedEffect(key1 = pagerState) {
+        while (true) {
+            kotlinx.coroutines.delay(5000)
+            val nextPage = (pagerState.currentPage + 1) % movies.size
+            pagerState.animateScrollToPage(nextPage)
+        }
+    }
+
+    val watchedMovies by viewModel.watchedMovies.collectAsState()
+
+    Box(
+        modifier = Modifier
+            .fillMaxWidth()
+            .height(260.dp)
+            .clip(RoundedCornerShape(16.dp))
+            .background(Color(0xFF161622))
+    ) {
+        HorizontalPager(
+            state = pagerState,
+            modifier = Modifier.fillMaxSize()
+        ) { page ->
+            val movie = movies[page]
+            val backdropUrl = movie.fullBackdropUrl ?: movie.fullPosterUrl
+            val isWatchlisted = viewModel.isInWatchlist(movie)
+
+            Box(
+                modifier = Modifier
+                    .fillMaxSize()
+                    .clickable { onMovieClick(movie) }
+            ) {
+                if (!backdropUrl.isNullOrEmpty()) {
+                    AsyncImage(
+                        model = backdropUrl,
+                        contentDescription = movie.title,
+                        modifier = Modifier.fillMaxSize(),
+                        contentScale = ContentScale.Crop
+                    )
+                }
+
+                // Gradient overlay
+                Box(
+                    modifier = Modifier
+                        .fillMaxSize()
+                        .background(
+                            Brush.verticalGradient(
+                                colors = listOf(Color.Transparent, Color.Black.copy(alpha = 0.9f)),
+                                startY = 100f
+                            )
+                        )
+                )
+
+                // Rating Overlay in upper right
+                movie.voteAverage?.let { score ->
+                    if (score > 0) {
+                        Box(
+                            modifier = Modifier
+                                .align(Alignment.TopEnd)
+                                .padding(12.dp)
+                                .background(Color(0xCC000000), RoundedCornerShape(4.dp))
+                                .padding(horizontal = 6.dp, vertical = 4.dp)
+                        ) {
+                            Row(verticalAlignment = Alignment.CenterVertically) {
+                                Icon(
+                                    imageVector = Icons.Default.Star,
+                                    contentDescription = null,
+                                    tint = Color(0xFFFFD700),
+                                    modifier = Modifier.size(12.dp)
+                                )
+                                Spacer(modifier = Modifier.width(3.dp))
+                                Text(
+                                    text = String.format(Locale.US, "%.1f", score),
+                                    fontSize = 11.sp,
+                                    fontWeight = FontWeight.Bold,
+                                    color = Color.White
+                                )
+                            }
+                        }
+                    }
+                }
+
+                // Content at the bottom
+                Column(
+                    modifier = Modifier
+                        .align(Alignment.BottomStart)
+                        .padding(16.dp)
+                ) {
+                    Surface(
+                        color = Color(0xFFFFD700).copy(alpha = 0.15f),
+                        shape = RoundedCornerShape(4.dp)
+                    ) {
+                        Text(
+                            text = "🔥 SOCIAL TRENDING SPOTLIGHT",
+                            color = Color(0xFFFFD700),
+                            fontSize = 8.sp,
+                            fontWeight = FontWeight.Bold,
+                            modifier = Modifier.padding(horizontal = 6.dp, vertical = 2.dp),
+                            letterSpacing = 1.sp
+                        )
+                    }
+
+                    Spacer(modifier = Modifier.height(4.dp))
+
+                    Text(
+                        text = movie.title,
+                        color = Color.White,
+                        fontSize = 18.sp,
+                        fontWeight = FontWeight.ExtraBold,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis
+                    )
+
+                    Spacer(modifier = Modifier.height(8.dp))
+
+                    Row(
+                        horizontalArrangement = Arrangement.spacedBy(8.dp),
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        // Play Button
+                        Button(
+                            onClick = { onPlayClick(movie) },
+                            colors = ButtonDefaults.buttonColors(containerColor = Color(0xFFFFD700)),
+                            contentPadding = PaddingValues(horizontal = 14.dp, vertical = 6.dp),
+                            shape = RoundedCornerShape(8.dp),
+                            modifier = Modifier.height(32.dp)
+                        ) {
+                            Icon(
+                                imageVector = Icons.Default.PlayArrow,
+                                contentDescription = null,
+                                tint = Color.Black,
+                                modifier = Modifier.size(16.dp)
+                            )
+                            Spacer(modifier = Modifier.width(4.dp))
+                            Text("Play", color = Color.Black, fontSize = 12.sp, fontWeight = FontWeight.Bold)
+                        }
+
+                        // Watchlist Button
+                        OutlinedButton(
+                            onClick = {
+                                if (isWatchlisted) {
+                                    viewModel.removeFromWatchlist(context, movie)
+                                } else {
+                                    viewModel.addToWatchlist(context, movie)
+                                }
+                            },
+                            border = BorderStroke(1.dp, if (isWatchlisted) Color(0xFFFF6B6B) else Color.White),
+                            colors = ButtonDefaults.outlinedButtonColors(
+                                contentColor = if (isWatchlisted) Color(0xFFFF6B6B) else Color.White
+                            ),
+                            contentPadding = PaddingValues(horizontal = 12.dp, vertical = 6.dp),
+                            shape = RoundedCornerShape(8.dp),
+                            modifier = Modifier.height(32.dp)
+                        ) {
+                            Icon(
+                                imageVector = if (isWatchlisted) Icons.Default.Favorite else Icons.Default.FavoriteBorder,
+                                contentDescription = null,
+                                tint = if (isWatchlisted) Color(0xFFFF6B6B) else Color.White,
+                                modifier = Modifier.size(14.dp)
+                            )
+                            Spacer(modifier = Modifier.width(4.dp))
+                            Text(
+                                text = if (isWatchlisted) "Saved" else "Watchlist",
+                                fontSize = 11.sp,
+                                fontWeight = FontWeight.Bold
+                            )
+                        }
+                    }
+                }
+            }
+        }
+
+        // Pager indicator
+        Row(
+            modifier = Modifier
+                .align(Alignment.BottomEnd)
+                .padding(16.dp),
+            horizontalArrangement = Arrangement.spacedBy(4.dp)
+        ) {
+            repeat(movies.size) { index ->
+                val active = pagerState.currentPage == index
+                Box(
+                    modifier = Modifier
+                        .size(if (active) 12.dp else 6.dp, 6.dp)
+                        .clip(RoundedCornerShape(3.dp))
+                        .background(if (active) Color(0xFFFFD700) else Color.White.copy(alpha = 0.5f))
+                )
+            }
+        }
+    }
+}
+
+@Composable
+fun AudienceBuzzRow(
+    reviews: List<TmdbReview>,
+    onReviewClick: (TmdbReview) -> Unit
+) {
+    if (reviews.isEmpty()) return
+
+    Column(modifier = Modifier.fillMaxWidth()) {
+        Text(
+            text = "💬 Audience Buzz (User Reviews)",
+            fontWeight = FontWeight.Bold,
+            fontSize = 18.sp,
+            color = Color(0xFFFFD700),
+            modifier = Modifier.padding(horizontal = 16.dp, vertical = 8.dp)
+        )
+
+        LazyRow(
+            contentPadding = PaddingValues(horizontal = 16.dp),
+            horizontalArrangement = Arrangement.spacedBy(12.dp),
+            modifier = Modifier.fillMaxWidth()
+        ) {
+            items(reviews) { review ->
+                Card(
+                    modifier = Modifier
+                        .width(280.dp)
+                        .height(130.dp)
+                        .clickable { onReviewClick(review) },
+                    shape = RoundedCornerShape(12.dp),
+                    colors = CardDefaults.cardColors(containerColor = Color(0xFF161622)),
+                    border = BorderStroke(1.dp, Color.White.copy(alpha = 0.1f))
+                ) {
+                    Column(
+                        modifier = Modifier
+                            .padding(12.dp)
+                            .fillMaxSize(),
+                        verticalArrangement = Arrangement.SpaceBetween
+                    ) {
+                        Row(
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.spacedBy(8.dp)
+                        ) {
+                            // Mini Poster
+                            val posterUrl = review.moviePoster?.let {
+                                if (it.startsWith("http")) it else "https://image.tmdb.org/t/p/w92$it"
+                            }
+                            if (!posterUrl.isNullOrEmpty()) {
+                                AsyncImage(
+                                    model = posterUrl,
+                                    contentDescription = review.movieTitle,
+                                    modifier = Modifier
+                                        .size(32.dp, 48.dp)
+                                        .clip(RoundedCornerShape(4.dp)),
+                                    contentScale = ContentScale.Crop
+                                )
+                            }
+
+                            Column(modifier = Modifier.weight(1f)) {
+                                Text(
+                                    text = review.movieTitle,
+                                    fontWeight = FontWeight.Bold,
+                                    fontSize = 12.sp,
+                                    color = Color.White,
+                                    maxLines = 1,
+                                    overflow = TextOverflow.Ellipsis
+                                )
+                                Text(
+                                    text = "by ${review.author}",
+                                    fontSize = 10.sp,
+                                    color = Color(0xFFFFD700),
+                                    maxLines = 1,
+                                    overflow = TextOverflow.Ellipsis
+                                )
+                            }
+
+                            review.rating?.let { rating ->
+                                Box(
+                                    modifier = Modifier
+                                        .background(Color(0xFF2E2E3A), RoundedCornerShape(4.dp))
+                                        .padding(horizontal = 4.dp, vertical = 2.dp)
+                                ) {
+                                    Row(verticalAlignment = Alignment.CenterVertically) {
+                                        Icon(
+                                            imageVector = Icons.Default.Star,
+                                            contentDescription = null,
+                                            tint = Color(0xFFFFD700),
+                                            modifier = Modifier.size(10.dp)
+                                        )
+                                        Spacer(modifier = Modifier.width(2.dp))
+                                        Text(
+                                            text = String.format(Locale.US, "%.0f", rating),
+                                            fontSize = 9.sp,
+                                            fontWeight = FontWeight.Bold,
+                                            color = Color.White
+                                        )
+                                    }
+                                }
+                            }
+                        }
+
+                        Text(
+                            text = review.content,
+                            fontSize = 11.sp,
+                            color = Color(0xFFC5C5D2),
+                            maxLines = 3,
+                            overflow = TextOverflow.Ellipsis,
+                            lineHeight = 15.sp,
+                            modifier = Modifier.padding(top = 4.dp)
+                        )
+                    }
+                }
+            }
+        }
     }
 }
 

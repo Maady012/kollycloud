@@ -255,3 +255,16 @@ data class TmdbPersonCrewCredit(
         }
     }
 }
+
+data class TmdbReview(
+    val id: String,
+    val author: String,
+    val username: String,
+    val rating: Double?,
+    val content: String,
+    val createdAt: String,
+    val movieId: Long,
+    val movieTitle: String,
+    val moviePoster: String?
+)
+

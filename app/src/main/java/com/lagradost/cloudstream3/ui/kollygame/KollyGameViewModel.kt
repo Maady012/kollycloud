@@ -13,10 +13,15 @@ import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import org.json.JSONObject
+import org.json.JSONArray
+import org.xmlpull.v1.XmlPullParser
+import org.xmlpull.v1.XmlPullParserFactory
+import java.net.HttpURLConnection
 import java.net.URL
 import java.text.SimpleDateFormat
 import java.util.Date
 import java.util.Locale
+
 
 sealed interface KollywoodUiState {
     object Loading : KollywoodUiState
@@ -41,6 +46,19 @@ class KollyGameViewModel : ViewModel() {
 
     private val _isRefreshing = MutableStateFlow(false)
     val isRefreshing: StateFlow<Boolean> = _isRefreshing.asStateFlow()
+
+    private val _socialTrendingMovies = MutableStateFlow<List<TmdbMovie>>(emptyList())
+    val socialTrendingMovies: StateFlow<List<TmdbMovie>> = _socialTrendingMovies.asStateFlow()
+
+    private val _nowRunningMovies = MutableStateFlow<List<TmdbMovie>>(emptyList())
+    val nowRunningMovies: StateFlow<List<TmdbMovie>> = _nowRunningMovies.asStateFlow()
+
+    private val _audienceBuzz = MutableStateFlow<List<TmdbReview>>(emptyList())
+    val audienceBuzz: StateFlow<List<TmdbReview>> = _audienceBuzz.asStateFlow()
+
+    private val _isReviewsLoading = MutableStateFlow(false)
+    val isReviewsLoading: StateFlow<Boolean> = _isReviewsLoading.asStateFlow()
+
 
     private val curatedTrailers = mapOf(
         991101L to "h8o0x8i_m2U", // Amaran
@@ -422,18 +440,288 @@ class KollyGameViewModel : ViewModel() {
         return saved.ifBlank { "6a466e5332dd8e436b7925a5c9f02ad2" }
     }
 
-    fun fetchKollywoodMovies(ctx: Context) {
+    private data class KollyNewsFeedItem(val title: String, val link: String, val category: String)
+
+    private fun parseRssFeed(urlString: String): List<KollyNewsFeedItem> {
+        val list = mutableListOf<KollyNewsFeedItem>()
+        var connection: HttpURLConnection? = null
+        try {
+            val url = URL(urlString)
+            connection = url.openConnection() as HttpURLConnection
+            connection.readTimeout = 8000
+            connection.connectTimeout = 8000
+            connection.setRequestProperty("User-Agent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64)")
+            
+            val factory = XmlPullParserFactory.newInstance()
+            factory.isNamespaceAware = true
+            val parser = factory.newPullParser()
+            parser.setInput(connection.inputStream, "UTF-8")
+            
+            var eventType = parser.eventType
+            var title = ""
+            var link = ""
+            var categoryBuilder = StringBuilder()
+            var insideItem = false
+            
+            while (eventType != XmlPullParser.END_DOCUMENT) {
+                val name = parser.name
+                when (eventType) {
+                    XmlPullParser.START_TAG -> {
+                        if (name.equals("item", ignoreCase = true)) {
+                            insideItem = true
+                            title = ""
+                            link = ""
+                            categoryBuilder = StringBuilder()
+                        } else if (insideItem) {
+                            when (name.lowercase()) {
+                                "title" -> title = parser.nextText().trim()
+                                "link" -> link = parser.nextText().trim()
+                                "category" -> {
+                                    val cat = parser.nextText().trim()
+                                    if (cat.isNotEmpty()) {
+                                        if (categoryBuilder.isNotEmpty()) categoryBuilder.append(",")
+                                        categoryBuilder.append(cat)
+                                    }
+                                }
+                                "keywords" -> {
+                                    val kw = parser.nextText().trim()
+                                    if (kw.isNotEmpty()) {
+                                        if (categoryBuilder.isNotEmpty()) categoryBuilder.append(",")
+                                        categoryBuilder.append(kw)
+                                    }
+                                }
+                            }
+                        }
+                    }
+                    XmlPullParser.END_TAG -> {
+                        if (name.equals("item", ignoreCase = true)) {
+                            if (title.isNotEmpty()) {
+                                list.add(KollyNewsFeedItem(title, link, categoryBuilder.toString()))
+                            }
+                            insideItem = false
+                        }
+                    }
+                }
+                eventType = parser.next()
+            }
+        } catch (e: Exception) {
+            Log.e("KollyGameVM", "Failed to parse RSS feed $urlString", e)
+        } finally {
+            connection?.disconnect()
+        }
+        return list
+    }
+
+    private suspend fun fetchSocialTrendingMovies(ctx: Context, apiKey: String): List<TmdbMovie> {
+        return withContext(Dispatchers.IO) {
+            val keywords = mutableSetOf<String>()
+            
+            // 1. Fetch Cinema Express
+            try {
+                val feedUrl = "https://www.cinemaexpress.com/feed"
+                val items = parseRssFeed(feedUrl)
+                items.forEach { item ->
+                    item.category.split(",").forEach { tag ->
+                        val clean = tag.trim()
+                        if (clean.length > 2) keywords.add(clean)
+                    }
+                    val quoteRegex = "['\"“]([^'\"”]+)['\"”]".toRegex()
+                    quoteRegex.findAll(item.title).forEach { match ->
+                        val clean = match.groups[1]?.value?.trim() ?: ""
+                        if (clean.length > 2 && clean.split(" ").size <= 4) {
+                            keywords.add(clean)
+                        }
+                    }
+                }
+            } catch (e: Exception) {
+                Log.e("KollyGameVM", "Error parsing Cinema Express keywords", e)
+            }
+            
+            // 2. Fetch Google News
+            try {
+                val feedUrl = "https://news.google.com/rss/search?q=Tamil+movie+releases&hl=en-IN&gl=IN&ceid=IN:en"
+                val items = parseRssFeed(feedUrl)
+                items.forEach { item ->
+                    val words = item.title.split(" ")
+                    val currentPhrase = mutableListOf<String>()
+                    words.forEach { word ->
+                        val cleanWord = word.replace(Regex("[^a-zA-Z]"), "")
+                        if (cleanWord.isNotEmpty() && cleanWord[0].isUpperCase()) {
+                            currentPhrase.add(cleanWord)
+                        } else {
+                            if (currentPhrase.isNotEmpty()) {
+                                val phraseStr = currentPhrase.joinToString(" ")
+                                if (phraseStr.length > 3 && currentPhrase.size <= 4) {
+                                    keywords.add(phraseStr)
+                                }
+                                currentPhrase.clear()
+                            }
+                        }
+                    }
+                    if (currentPhrase.isNotEmpty()) {
+                        val phraseStr = currentPhrase.joinToString(" ")
+                        if (phraseStr.length > 3 && currentPhrase.size <= 4) {
+                            keywords.add(phraseStr)
+                        }
+                    }
+                }
+            } catch (e: Exception) {
+                Log.e("KollyGameVM", "Error parsing Google News keywords", e)
+            }
+            
+            val candidateMovies = mutableListOf<TmdbMovie>()
+            
+            // 3. Search matched movies on TMDB in parallel
+            val deferredSearches = keywords.take(15).map { keyword ->
+                async {
+                    try {
+                        val encoded = java.net.URLEncoder.encode(keyword, "UTF-8")
+                        val url = "https://api.themoviedb.org/3/search/movie?api_key=$apiKey&query=$encoded&with_original_language=ta&page=1"
+                        val (results, _) = fetchMoviesFromApiInternal(url)
+                        results.firstOrNull { movie ->
+                            movie.title.contains(keyword, ignoreCase = true) ||
+                            movie.originalTitle?.contains(keyword, ignoreCase = true) == true
+                        }
+                    } catch (e: Exception) {
+                        null
+                    }
+                }
+            }
+            
+            deferredSearches.forEach { deferred ->
+                deferred.await()?.let { movie ->
+                    if (candidateMovies.none { it.id == movie.id }) {
+                        candidateMovies.add(movie)
+                    }
+                }
+            }
+            
+            candidateMovies.take(10)
+        }
+    }
+
+    private suspend fun fetchNowRunningMovies(apiKey: String): List<TmdbMovie> {
+        return withContext(Dispatchers.IO) {
+            try {
+                val dateFormat = SimpleDateFormat("yyyy-MM-dd", Locale.getDefault())
+                val today = Date()
+                val todayStr = dateFormat.format(today)
+                val cal = java.util.Calendar.getInstance()
+                cal.time = today
+                cal.add(java.util.Calendar.DAY_OF_YEAR, -35)
+                val startDateStr = dateFormat.format(cal.time)
+                
+                val url = "https://api.themoviedb.org/3/discover/movie?api_key=$apiKey&with_original_language=ta&region=IN&primary_release_date.gte=$startDateStr&primary_release_date.lte=$todayStr&sort_by=popularity.desc&page=1"
+                fetchMoviesFromApiInternal(url).first
+            } catch (e: Exception) {
+                Log.e("KollyGameVM", "Failed to fetch now running movies", e)
+                emptyList()
+            }
+        }
+    }
+
+    private suspend fun fetchAudienceBuzz(ctx: Context, movies: List<TmdbMovie>, apiKey: String): List<TmdbReview> {
+        return withContext(Dispatchers.IO) {
+            val list = mutableListOf<TmdbReview>()
+            val deferredReviews = movies.take(5).map { movie ->
+                async {
+                    try {
+                        val url = "https://api.themoviedb.org/3/movie/${movie.id}/reviews?api_key=$apiKey"
+                        val json = URL(url).openStream().bufferedReader().readText()
+                        val root = JSONObject(json)
+                        val results = root.optJSONArray("results")
+                        val movieReviews = mutableListOf<TmdbReview>()
+                        if (results != null) {
+                            for (i in 0 until results.length()) {
+                                val obj = results.getJSONObject(i)
+                                val authorDetails = obj.optJSONObject("author_details")
+                                val rating = authorDetails?.optDouble("rating", -1.0) ?: -1.0
+                                val content = obj.optString("content", "")
+                                if (content.length > 50) {
+                                    movieReviews.add(TmdbReview(
+                                        id = obj.optString("id"),
+                                        author = obj.optString("author"),
+                                        username = authorDetails?.optString("username") ?: obj.optString("author"),
+                                        rating = if (rating == -1.0) null else rating,
+                                        content = content,
+                                        createdAt = obj.optString("created_at"),
+                                        movieId = movie.id,
+                                        movieTitle = movie.title,
+                                        moviePoster = movie.posterPath
+                                    ))
+                                }
+                            }
+                        }
+                        movieReviews
+                    } catch (e: Exception) {
+                        emptyList<TmdbReview>()
+                    }
+                }
+            }
+            
+            deferredReviews.forEach { deferred ->
+                list.addAll(deferred.await())
+            }
+            list.sortedByDescending { it.createdAt }
+        }
+    }
+
+    private fun fetchMoviesFromApiInternal(urlString: String): Pair<List<TmdbMovie>, Int> {
+        return try {
+            val json = URL(urlString).openStream().bufferedReader().readText()
+            val root = JSONObject(json)
+            val totalPages = root.optInt("total_pages", 1)
+            val results = root.optJSONArray("results")
+            val list = mutableListOf<TmdbMovie>()
+            if (results != null) {
+                for (i in 0 until results.length()) {
+                    list.add(TmdbMovie.fromJson(results.getJSONObject(i)))
+                }
+            }
+            Pair(list, totalPages)
+        } catch (e: Exception) {
+            Log.e("KollyGameVM", "API fetch error: $urlString", e)
+            Pair(emptyList(), 1)
+        }
+    }
+
+    fun fetchKollywoodMovies(ctx: Context, forceRefresh: Boolean = false) {
         loadWatchlist(ctx)
         loadWatchedMovies(ctx)
+        
         viewModelScope.launch {
-            val currentState = _kollywoodState.value
-            val hasData = currentState is KollywoodUiState.Success || 
-                          (currentState is KollywoodUiState.Error && currentState.fallbackTrending != null)
-            
-            if (!hasData) {
-                _kollywoodState.value = KollywoodUiState.Loading
-            } else {
+            if (forceRefresh) {
                 _isRefreshing.value = true
+            }
+
+            val prefs = ctx.getSharedPreferences("kolly_gaming_secure_prefs", Context.MODE_PRIVATE)
+            val lastFetchTime = prefs.getLong("last_kolly_fetch_time", 0L)
+            val cacheExpired = (System.currentTimeMillis() - lastFetchTime) > 3600000L
+            
+            val cachedTrending = getCachedMovies(ctx, "trending")
+            val cachedTopRated = getCachedMovies(ctx, "top_rated")
+            val cachedUpcoming = getCachedMovies(ctx, "upcoming")
+            val cachedNowRunning = getCachedMovies(ctx, "now_running")
+            val cachedSocialTrending = getCachedMovies(ctx, "social_trending")
+            val cachedReviews = getCachedReviews(ctx, "audience_buzz")
+
+            val hasData = cachedTrending != null && cachedTopRated != null && cachedUpcoming != null
+            if (hasData) {
+                _kollywoodState.value = KollywoodUiState.Success(
+                    trending = cachedTrending!!,
+                    topRated = cachedTopRated!!,
+                    upcoming = cachedUpcoming!!,
+                    isDemoMode = false
+                )
+                _nowRunningMovies.value = cachedNowRunning ?: emptyList()
+                _socialTrendingMovies.value = cachedSocialTrending ?: emptyList()
+                _audienceBuzz.value = cachedReviews ?: emptyList()
+            } else {
+                _kollywoodState.value = KollywoodUiState.Loading
+            }
+
+            if (!cacheExpired && !forceRefresh && hasData) {
+                return@launch
             }
 
             try {
@@ -442,47 +730,60 @@ class KollyGameViewModel : ViewModel() {
                     val trending = getCuratedTrendingMovies()
                     val topRated = getCuratedTopRatedMovies()
                     val upcoming = getCuratedUpcomingMovies()
+                    
                     _kollywoodState.value = KollywoodUiState.Success(
                         trending = trending,
                         topRated = topRated,
                         upcoming = upcoming,
                         isDemoMode = true
                     )
+                    _nowRunningMovies.value = emptyList()
+                    _socialTrendingMovies.value = emptyList()
+                    _audienceBuzz.value = emptyList()
                 } else {
                     val todayDate = SimpleDateFormat("yyyy-MM-dd", Locale.getDefault()).format(Date())
                     
-                    val results = coroutineScope {
+                    coroutineScope {
                         val trendingDeferred = async(Dispatchers.IO) {
-                            fetchMoviesFromApi("https://api.themoviedb.org/3/discover/movie?api_key=$apiKey&with_original_language=ta&region=IN&sort_by=popularity.desc&page=1")
+                            fetchMoviesFromApi("https://api.themoviedb.org/3/discover/movie?api_key=$apiKey&with_original_language=ta&region=IN&sort_by=popularity.desc&vote_count.gte=20&page=1")
                         }
                         val topRatedDeferred = async(Dispatchers.IO) {
-                            fetchMoviesFromApi("https://api.themoviedb.org/3/discover/movie?api_key=$apiKey&with_original_language=ta&region=IN&sort_by=vote_average.desc&vote_count.gte=8&page=1")
+                            fetchMoviesFromApi("https://api.themoviedb.org/3/discover/movie?api_key=$apiKey&with_original_language=ta&region=IN&sort_by=vote_average.desc&vote_count.gte=50&page=1")
                         }
                         val upcomingDeferred = async(Dispatchers.IO) {
-                            fetchMoviesFromApi("https://api.themoviedb.org/3/discover/movie?api_key=$apiKey&with_original_language=ta&region=IN&sort_by=primary_release_date.asc&primary_release_date.gte=$todayDate&page=1")
+                            fetchMoviesFromApi("https://api.themoviedb.org/3/discover/movie?api_key=$apiKey&with_original_language=ta&region=IN&sort_by=popularity.desc&primary_release_date.gte=$todayDate&page=1")
+                        }
+                        val nowRunningDeferred = async(Dispatchers.IO) {
+                            fetchNowRunningMovies(apiKey)
                         }
 
-                        listOf(
-                            trendingDeferred.await().ifEmpty { getCuratedTrendingMovies() },
-                            topRatedDeferred.await().ifEmpty { getCuratedTopRatedMovies() },
-                            upcomingDeferred.await().ifEmpty { getCuratedUpcomingMovies() }
+                        val trending = trendingDeferred.await().ifEmpty { getCuratedTrendingMovies() }
+                        val topRated = topRatedDeferred.await().ifEmpty { getCuratedTopRatedMovies() }
+                        val upcoming = upcomingDeferred.await().ifEmpty { getCuratedUpcomingMovies() }
+                        val nowRunning = nowRunningDeferred.await()
+
+                        val socialTrending = fetchSocialTrendingMovies(ctx, apiKey)
+                        val reviews = fetchAudienceBuzz(ctx, socialTrending.ifEmpty { trending }, apiKey)
+
+                        saveCachedJson(ctx, "trending", trending)
+                        saveCachedJson(ctx, "top_rated", topRated)
+                        saveCachedJson(ctx, "upcoming", upcoming)
+                        saveCachedJson(ctx, "now_running", nowRunning)
+                        saveCachedJson(ctx, "social_trending", socialTrending)
+                        saveCachedReviews(ctx, "audience_buzz", reviews)
+
+                        prefs.edit().putLong("last_kolly_fetch_time", System.currentTimeMillis()).apply()
+
+                        _kollywoodState.value = KollywoodUiState.Success(
+                            trending = trending,
+                            topRated = topRated,
+                            upcoming = upcoming,
+                            isDemoMode = false
                         )
+                        _nowRunningMovies.value = nowRunning
+                        _socialTrendingMovies.value = socialTrending
+                        _audienceBuzz.value = reviews
                     }
-
-                    val trending = results[0]
-                    val topRated = results[1]
-                    val upcoming = results[2]
-
-                    saveCachedJson(ctx, "trending", trending)
-                    saveCachedJson(ctx, "top_rated", topRated)
-                    saveCachedJson(ctx, "upcoming", upcoming)
-
-                    _kollywoodState.value = KollywoodUiState.Success(
-                        trending = trending,
-                        topRated = topRated,
-                        upcoming = upcoming,
-                        isDemoMode = false
-                    )
                 }
             } catch (e: Exception) {
                 Log.e("KollyGameVM", "TMDB API request failed, loading local secure cache fallback", e)
@@ -695,6 +996,58 @@ class KollyGameViewModel : ViewModel() {
             list
         } catch (e: Exception) {
             Log.e("KollyGameVM", "Failed to read cached movies", e)
+            null
+        }
+    }
+
+    private fun saveCachedReviews(ctx: Context, key: String, reviews: List<TmdbReview>) {
+        try {
+            val prefs = ctx.getSharedPreferences("kolly_gaming_secure_prefs", Context.MODE_PRIVATE)
+            val jsonArr = org.json.JSONArray()
+            reviews.forEach { r ->
+                val obj = JSONObject().apply {
+                    put("id", r.id)
+                    put("author", r.author)
+                    put("username", r.username)
+                    put("rating", r.rating ?: -1.0)
+                    put("content", r.content)
+                    put("created_at", r.createdAt)
+                    put("movie_id", r.movieId)
+                    put("movie_title", r.movieTitle)
+                    put("movie_poster", r.moviePoster)
+                }
+                jsonArr.put(obj)
+            }
+            prefs.edit().putString("cache_reviews_$key", jsonArr.toString()).apply()
+        } catch (e: Exception) {
+            Log.e("KollyGameVM", "Failed to cache reviews", e)
+        }
+    }
+
+    private fun getCachedReviews(ctx: Context, key: String): List<TmdbReview>? {
+        return try {
+            val prefs = ctx.getSharedPreferences("kolly_gaming_secure_prefs", Context.MODE_PRIVATE)
+            val jsonStr = prefs.getString("cache_reviews_$key", null) ?: return null
+            val jsonArr = org.json.JSONArray(jsonStr)
+            val list = mutableListOf<TmdbReview>()
+            for (i in 0 until jsonArr.length()) {
+                val obj = jsonArr.getJSONObject(i)
+                val ratingVal = obj.optDouble("rating", -1.0)
+                list.add(TmdbReview(
+                    id = obj.getString("id"),
+                    author = obj.getString("author"),
+                    username = obj.getString("username"),
+                    rating = if (ratingVal == -1.0) null else ratingVal,
+                    content = obj.getString("content"),
+                    createdAt = obj.getString("created_at"),
+                    movieId = obj.getLong("movie_id"),
+                    movieTitle = obj.getString("movie_title"),
+                    moviePoster = obj.optString("movie_poster").takeIf { it.isNotBlank() }
+                ))
+            }
+            list
+        } catch (e: Exception) {
+            Log.e("KollyGameVM", "Failed to read cached reviews", e)
             null
         }
     }
