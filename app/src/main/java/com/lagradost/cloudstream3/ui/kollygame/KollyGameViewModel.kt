@@ -498,7 +498,7 @@ class KollyGameViewModel : ViewModel() {
                 val name = parser.name
                 when (eventType) {
                     XmlPullParser.START_TAG -> {
-                        if (name.equals("item", ignoreCase = true)) {
+                        if (name.equals("item", ignoreCase = true) || name.equals("entry", ignoreCase = true)) {
                             insideItem = true
                             title = ""
                             link = ""
@@ -525,7 +525,7 @@ class KollyGameViewModel : ViewModel() {
                         }
                     }
                     XmlPullParser.END_TAG -> {
-                        if (name.equals("item", ignoreCase = true)) {
+                        if (name.equals("item", ignoreCase = true) || name.equals("entry", ignoreCase = true)) {
                             if (title.isNotEmpty()) {
                                 list.add(KollyNewsFeedItem(title, link, categoryBuilder.toString()))
                             }
@@ -599,6 +599,38 @@ class KollyGameViewModel : ViewModel() {
             } catch (e: Exception) {
                 Log.e("KollyGameVM", "Error parsing Google News keywords", e)
             }
+
+            // 3. Fetch Reddit /r/kollywood Hot discussions
+            try {
+                val feedUrl = "https://www.reddit.com/r/kollywood/hot.rss"
+                val items = parseRssFeed(feedUrl)
+                items.forEach { item ->
+                    val words = item.title.split(" ")
+                    val currentPhrase = mutableListOf<String>()
+                    words.forEach { word ->
+                        val cleanWord = word.replace(Regex("[^a-zA-Z]"), "")
+                        if (cleanWord.isNotEmpty() && cleanWord[0].isUpperCase()) {
+                            currentPhrase.add(cleanWord)
+                        } else {
+                            if (currentPhrase.isNotEmpty()) {
+                                val phraseStr = currentPhrase.joinToString(" ")
+                                if (phraseStr.length > 3 && currentPhrase.size <= 4) {
+                                    keywords.add(phraseStr)
+                                }
+                                currentPhrase.clear()
+                            }
+                        }
+                    }
+                    if (currentPhrase.isNotEmpty()) {
+                        val phraseStr = currentPhrase.joinToString(" ")
+                        if (phraseStr.length > 3 && currentPhrase.size <= 4) {
+                            keywords.add(phraseStr)
+                        }
+                    }
+                }
+            } catch (e: Exception) {
+                Log.e("KollyGameVM", "Error parsing Reddit r/kollywood keywords", e)
+            }
             
             val candidateMovies = mutableListOf<TmdbMovie>()
             
@@ -610,8 +642,10 @@ class KollyGameViewModel : ViewModel() {
                         val url = "https://api.themoviedb.org/3/search/movie?api_key=$apiKey&query=$encoded&with_original_language=ta&page=1"
                         val (results, _) = fetchMoviesFromApiInternal(url)
                         results.firstOrNull { movie ->
-                            movie.title.contains(keyword, ignoreCase = true) ||
-                            movie.originalTitle?.contains(keyword, ignoreCase = true) == true
+                            movie.originalLanguage == "ta" && (
+                                movie.title.contains(keyword, ignoreCase = true) ||
+                                movie.originalTitle?.contains(keyword, ignoreCase = true) == true
+                            )
                         }
                     } catch (e: Exception) {
                         null
