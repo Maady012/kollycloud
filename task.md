@@ -89,12 +89,13 @@ This document tracks all requests, actions, command logs, pending items, and pro
 
 
 ### 🌟 Active Development (Curator AI & Resizable PiP)
-- [ ] **Implement drag-resizable floating PiP overlay:**
+- [x] **Implement drag-resizable floating PiP overlay:**
   - Add pointer input gesture handlers to adjust box dimension dynamically.
   - Implement minimum and maximum scale bounds to maintain aspect ratio.
-- [ ] **Integrate AI-Powered Curator search & recommendation chat:**
+- [x] **Integrate AI-Powered Curator search & recommendation chat:**
   - Scaffold tokenizer and local ONNX runtime embeddings execution.
   - Render Conversational AI message streams with embedded recommendation cards.
+
 
 ### 🚀 Next-Generation Architecture Roadmap
 - [ ] **Hybrid KollyCloud Hot Score & Calendar discovery engine:**
