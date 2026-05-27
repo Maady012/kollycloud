@@ -19,10 +19,13 @@ import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.gestures.detectDragGestures
+import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyRow
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
+
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
@@ -544,94 +547,164 @@ fun KollywoodScreen(
                     )
                 }
             }
+                    if (showAiCurator) {
+                val chatMessages by viewModel.curatorChatMessages.collectAsState()
+                val isCurating by viewModel.isCurating.collectAsState()
 
-            if (showAiCurator) {
                 Card(
                     modifier = Modifier
                         .fillMaxWidth()
+                        .height(380.dp)
                         .padding(horizontal = 16.dp, vertical = 6.dp),
-                    shape = RoundedCornerShape(12.dp),
-                    colors = CardDefaults.cardColors(containerColor = Color(0xFF1E1E2C)),
+                    shape = RoundedCornerShape(16.dp),
+                    colors = CardDefaults.cardColors(containerColor = Color(0xFF161622)),
                     border = BorderStroke(1.dp, Color(0xFFFFD700).copy(alpha = 0.25f))
                 ) {
-                    Column(modifier = Modifier.padding(12.dp)) {
+                    Column(modifier = Modifier.fillMaxSize().padding(12.dp)) {
                         Text(
-                            text = "Curate your feed with natural language phrases:",
-                            color = Color(0xFFC5C5D2),
-                            fontSize = 11.sp,
-                            fontWeight = FontWeight.Medium
+                            text = "🤖 KollyAI Curator Chat",
+                            color = Color(0xFFFFD700),
+                            fontSize = 13.sp,
+                            fontWeight = FontWeight.Bold
                         )
                         Spacer(modifier = Modifier.height(8.dp))
-                        OutlinedTextField(
-                            value = curatorPrompt,
-                            onValueChange = { curatorPrompt = it },
-                            placeholder = { Text("e.g. Gritty Kamal action thriller in the 90s...", color = Color.Gray, fontSize = 12.sp) },
-                            singleLine = true,
-                            shape = RoundedCornerShape(8.dp),
-                            colors = OutlinedTextFieldDefaults.colors(
-                                focusedTextColor = Color.White,
-                                unfocusedTextColor = Color.White,
-                                focusedContainerColor = Color(0xFF0F0F16),
-                                unfocusedContainerColor = Color(0xFF0F0F16),
-                                focusedBorderColor = Color(0xFFFFD700),
-                                unfocusedBorderColor = Color.Gray.copy(alpha = 0.2f)
-                            ),
-                            modifier = Modifier.fillMaxWidth()
-                        )
+                        
+                        // Messages Stream
+                        LazyColumn(
+                            modifier = Modifier
+                                .weight(1f)
+                                .fillMaxWidth(),
+                            verticalArrangement = Arrangement.spacedBy(8.dp)
+                        ) {
+                            items(chatMessages) { msg ->
+                                val isAi = msg.sender == "KollyAI"
+                                Column(
+                                    modifier = Modifier
+                                        .fillMaxWidth(),
+                                    horizontalAlignment = if (isAi) Alignment.Start else Alignment.End
+                                ) {
+                                    Box(
+                                        modifier = Modifier
+                                            .clip(RoundedCornerShape(
+                                                topStart = 12.dp,
+                                                topEnd = 12.dp,
+                                                bottomStart = if (isAi) 0.dp else 12.dp,
+                                                bottomEnd = if (isAi) 12.dp else 0.dp
+                                            ))
+                                            .background(if (isAi) Color(0xFF2E2E3A) else Color(0x33FFFFD700))
+                                            .padding(10.dp)
+                                    ) {
+                                        Text(
+                                            text = msg.text,
+                                            color = Color.White,
+                                            fontSize = 11.sp
+                                        )
+                                    }
+                                    if (isAi && msg.recommendedMovies.isNotEmpty()) {
+                                        Spacer(modifier = Modifier.height(6.dp))
+                                        LazyRow(
+                                            horizontalArrangement = Arrangement.spacedBy(8.dp),
+                                            contentPadding = PaddingValues(vertical = 4.dp)
+                                        ) {
+                                            items(msg.recommendedMovies) { movie ->
+                                                Card(
+                                                    modifier = Modifier
+                                                        .width(100.dp)
+                                                        .clickable {
+                                                            viewModel.activeTrailerVideoId.value = "search:${movie.title} trailer"
+                                                            viewModel.isTrailerMinimized.value = false
+                                                        },
+                                                    shape = RoundedCornerShape(8.dp),
+                                                    colors = CardDefaults.cardColors(containerColor = Color(0xFF1E1E2C))
+                                                ) {
+                                                    Column(modifier = Modifier.padding(6.dp)) {
+                                                        Box(
+                                                            modifier = Modifier
+                                                                .fillMaxWidth()
+                                                                .height(100.dp)
+                                                                .clip(RoundedCornerShape(6.dp))
+                                                                .background(Color.DarkGray)
+                                                        ) {
+                                                            if (!movie.posterPath.isNullOrBlank()) {
+                                                                AsyncImage(
+                                                                    model = "https://image.tmdb.org/t/p/w185${movie.posterPath}",
+                                                                    contentDescription = movie.title,
+                                                                    modifier = Modifier.fillMaxSize(),
+                                                                    contentScale = ContentScale.Crop
+                                                                )
+                                                            }
+                                                        }
+                                                        Spacer(modifier = Modifier.height(4.dp))
+                                                        Text(
+                                                            text = movie.title,
+                                                            color = Color.White,
+                                                            fontSize = 9.sp,
+                                                            fontWeight = FontWeight.Bold,
+                                                            maxLines = 1,
+                                                            overflow = TextOverflow.Ellipsis
+                                                        )
+                                                    }
+                                                }
+                                            }
+                                        }
+                                    }
+                                }
+                            }
+                            if (isCurating) {
+                                item {
+                                    Box(
+                                        modifier = Modifier
+                                            .padding(top = 8.dp)
+                                            .clip(RoundedCornerShape(12.dp))
+                                            .background(Color(0xFF2E2E3A))
+                                            .padding(10.dp)
+                                    ) {
+                                        CircularProgressIndicator(
+                                            modifier = Modifier.size(16.dp),
+                                            color = Color(0xFFFFD700),
+                                            strokeWidth = 2.dp
+                                        )
+                                    }
+                                }
+                            }
+                        }
+
                         Spacer(modifier = Modifier.height(8.dp))
+                        
+                        // Input Area
                         Row(
                             modifier = Modifier.fillMaxWidth(),
-                            horizontalArrangement = Arrangement.spacedBy(8.dp),
-                            verticalAlignment = Alignment.CenterVertically
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.spacedBy(8.dp)
                         ) {
+                            OutlinedTextField(
+                                value = curatorPrompt,
+                                onValueChange = { curatorPrompt = it },
+                                placeholder = { Text("Ask KollyAI...", color = Color.Gray, fontSize = 11.sp) },
+                                singleLine = true,
+                                shape = RoundedCornerShape(8.dp),
+                                colors = OutlinedTextFieldDefaults.colors(
+                                    focusedTextColor = Color.White,
+                                    unfocusedTextColor = Color.White,
+                                    focusedContainerColor = Color(0xFF0F0F16),
+                                    unfocusedContainerColor = Color(0xFF0F0F16),
+                                    focusedBorderColor = Color(0xFFFFD700),
+                                    unfocusedBorderColor = Color.Gray.copy(alpha = 0.2f)
+                                ),
+                                modifier = Modifier.weight(1f)
+                            )
                             Button(
                                 onClick = {
                                     if (curatorPrompt.isNotBlank()) {
                                         viewModel.curateSearch(context, curatorPrompt)
-                                        showAiCurator = false
+                                        curatorPrompt = ""
                                     }
                                 },
+                                enabled = curatorPrompt.isNotBlank() && !isCurating,
                                 colors = ButtonDefaults.buttonColors(containerColor = Color(0xFFFFD700)),
-                                modifier = Modifier.weight(1f),
                                 shape = RoundedCornerShape(8.dp)
                             ) {
-                                Text("Ask KollyAI", color = Color.Black, fontSize = 12.sp, fontWeight = FontWeight.Bold)
-                            }
-                            OutlinedButton(
-                                onClick = {
-                                    curatorPrompt = ""
-                                },
-                                border = BorderStroke(1.dp, Color.Gray),
-                                modifier = Modifier.weight(1f),
-                                shape = RoundedCornerShape(8.dp)
-                            ) {
-                                Text("Clear", color = Color.White, fontSize = 12.sp)
-                            }
-                        }
-                        
-                        // Suggestion chips
-                        Spacer(modifier = Modifier.height(10.dp))
-                        Text("💡 Quick suggestions:", color = Color.Gray, fontSize = 10.sp)
-                        Spacer(modifier = Modifier.height(4.dp))
-                        LazyRow(
-                            horizontalArrangement = Arrangement.spacedBy(6.dp),
-                            contentPadding = PaddingValues(vertical = 4.dp)
-                        ) {
-                            val chips = listOf("90s action thriller", "Kamal comedy", "Vijay blockbuster", "Recent love story")
-                            items(chips) { chip ->
-                                Box(
-                                    modifier = Modifier
-                                        .clip(RoundedCornerShape(12.dp))
-                                        .background(Color(0xFF2E2E3A))
-                                        .clickable {
-                                            curatorPrompt = chip
-                                            viewModel.curateSearch(context, chip)
-                                            showAiCurator = false
-                                        }
-                                        .padding(horizontal = 10.dp, vertical = 6.dp)
-                                ) {
-                                    Text(chip, color = Color.White, fontSize = 10.sp, fontWeight = FontWeight.Bold)
-                                }
+                                Text("Send", color = Color.Black, fontSize = 11.sp, fontWeight = FontWeight.Bold)
                             }
                         }
                     }
@@ -976,18 +1049,48 @@ fun KollywoodScreen(
             }
         }
 
-        // Global Premium glassmorphic floating PiP card overlay
+        // Global Premium glassmorphic floating PiP card overlay with Drag & Resize Gestures
         if (activeTrailer != null) {
+            var offsetX by remember { mutableStateOf(0f) }
+            var offsetY by remember { mutableStateOf(0f) }
+            var widthScale by remember { mutableStateOf(1.0f) }
+
             Box(
                 modifier = Modifier
                     .fillMaxSize()
                     .padding(16.dp),
                 contentAlignment = Alignment.BottomEnd
             ) {
+                val baseWidth = if (isMinimized) 180.dp else 320.dp
+                val baseHeight = if (isMinimized) 110.dp else 220.dp
+                val density = androidx.compose.ui.platform.LocalDensity.current
+
                 Card(
                     modifier = Modifier
-                        .width(if (isMinimized) 180.dp else 320.dp)
-                        .height(if (isMinimized) 110.dp else 220.dp),
+                        .offset {
+                            androidx.compose.ui.unit.IntOffset(
+                                offsetX.toInt(),
+                                offsetY.toInt()
+                            )
+                        }
+                        .width(baseWidth * widthScale)
+                        .height(baseHeight * widthScale)
+                        .pointerInput(Unit) {
+                            detectDragGestures(
+                                onDrag = { change, dragAmount ->
+                                    change.consume()
+                                    // If dragging from bottom-left corner region, trigger resize instead of move
+                                    val isNearResizeCorner = change.position.x < 40.dp.toPx() && change.position.y > (baseHeight * widthScale - 40.dp).toPx()
+                                    if (isNearResizeCorner) {
+                                        val factor = 1.0f - (dragAmount.x / baseWidth.toPx())
+                                        widthScale = (widthScale * factor).coerceIn(0.6f, 1.8f)
+                                    } else {
+                                        offsetX += dragAmount.x
+                                        offsetY += dragAmount.y
+                                    }
+                                }
+                            )
+                        },
                     shape = RoundedCornerShape(16.dp),
                     colors = CardDefaults.cardColors(containerColor = Color(0xCC161622)),
                     border = BorderStroke(1.dp, Color(0xFFFFD700).copy(alpha = 0.4f))
@@ -1003,32 +1106,32 @@ fun KollywoodScreen(
                         ) {
                             Text(
                                 text = "🍿 Trailer Theater",
-                                fontSize = 10.sp,
+                                fontSize = (10 * widthScale).coerceIn(8f, 14f).sp,
                                 fontWeight = FontWeight.Bold,
                                 color = Color(0xFFFFD700),
                                 modifier = Modifier.weight(1f)
                             )
                             IconButton(
                                 onClick = { viewModel.isTrailerMinimized.value = !isMinimized },
-                                modifier = Modifier.size(20.dp)
+                                modifier = Modifier.size((20 * widthScale).coerceIn(16f, 28f).dp)
                             ) {
                                 Icon(
                                     imageVector = if (isMinimized) Icons.Default.Fullscreen else Icons.Default.Minimize,
                                     contentDescription = "Minimize Toggle",
                                     tint = Color.White,
-                                    modifier = Modifier.size(12.dp)
+                                    modifier = Modifier.size((12 * widthScale).coerceIn(10f, 18f).dp)
                                 )
                             }
                             Spacer(modifier = Modifier.width(6.dp))
                             IconButton(
                                 onClick = { viewModel.activeTrailerVideoId.value = null },
-                                modifier = Modifier.size(20.dp)
+                                modifier = Modifier.size((20 * widthScale).coerceIn(16f, 28f).dp)
                             ) {
                                 Icon(
                                     imageVector = Icons.Default.Close,
                                     contentDescription = "Close",
                                     tint = Color.White,
-                                    modifier = Modifier.size(12.dp)
+                                    modifier = Modifier.size((12 * widthScale).coerceIn(10f, 18f).dp)
                                 )
                             }
                         }
@@ -1057,6 +1160,7 @@ fun KollywoodScreen(
                 }
             }
         }
+
     }
 }
 

@@ -206,6 +206,16 @@ class KollyGameViewModel : ViewModel() {
     val activeTrailerVideoId = MutableStateFlow<String?>(null)
     val isTrailerMinimized = MutableStateFlow(false)
 
+    // Curator Chat States
+    data class CuratorMessage(val sender: String, val text: String, val recommendedMovies: List<TmdbMovie> = emptyList())
+    private val _curatorChatMessages = MutableStateFlow<List<CuratorMessage>>(
+        listOf(CuratorMessage("KollyAI", "Hello! I am your AI Curator. Ask me to find movies using natural phrases, like '90s Kamal action thriller' or 'superstar blockbuster with high ratings'!"))
+    )
+    val curatorChatMessages: StateFlow<List<CuratorMessage>> = _curatorChatMessages.asStateFlow()
+    private val _isCurating = MutableStateFlow(false)
+    val isCurating: StateFlow<Boolean> = _isCurating.asStateFlow()
+
+
     // Map genres to TMDB genre IDs
     private val genreMap = mapOf(
         "Action" to 28L,
@@ -373,59 +383,86 @@ class KollyGameViewModel : ViewModel() {
     }
 
     fun curateSearch(ctx: Context, prompt: String) {
-        val cleanPrompt = prompt.lowercase(Locale.getDefault())
-        
-        // Parse Decade/Year
-        var yearFilter = "All"
-        if (cleanPrompt.contains("90s") || cleanPrompt.contains("1990")) yearFilter = "199"
-        else if (cleanPrompt.contains("80s") || cleanPrompt.contains("1980")) yearFilter = "198"
-        else if (cleanPrompt.contains("2000s")) yearFilter = "200"
-        else if (cleanPrompt.contains("recent") || cleanPrompt.contains("202")) yearFilter = "202"
-        
-        // Parse Genre
-        var genreFilter = "All"
-        if (cleanPrompt.contains("action")) genreFilter = "Action"
-        else if (cleanPrompt.contains("comedy")) genreFilter = "Comedy"
-        else if (cleanPrompt.contains("thriller") || cleanPrompt.contains("gritty") || cleanPrompt.contains("dark")) genreFilter = "Thriller"
-        else if (cleanPrompt.contains("romance") || cleanPrompt.contains("love")) genreFilter = "Romance"
-        else if (cleanPrompt.contains("family")) genreFilter = "Family"
-        else if (cleanPrompt.contains("sci-fi") || cleanPrompt.contains("scifi")) genreFilter = "Sci-Fi"
-        else if (cleanPrompt.contains("horror")) genreFilter = "Horror"
-        else if (cleanPrompt.contains("drama")) genreFilter = "Drama"
-        
-        // Parse Actor
-        var actorFilter: TmdbCastMember? = null
-        if (cleanPrompt.contains("kamal") || cleanPrompt.contains("haasan")) {
-            actorFilter = TmdbCastMember(30784L, "Kamal Haasan", null, null)
-        } else if (cleanPrompt.contains("rajini") || cleanPrompt.contains("superstar")) {
-            actorFilter = TmdbCastMember(819L, "Rajinikanth", null, null)
-        } else if (cleanPrompt.contains("vijay") || cleanPrompt.contains("thalapathy")) {
-            actorFilter = TmdbCastMember(58197L, "Vijay", null, null)
-        } else if (cleanPrompt.contains("ajith") || cleanPrompt.contains("thala")) {
-            actorFilter = TmdbCastMember(75510L, "Ajith Kumar", null, null)
-        } else if (cleanPrompt.contains("suriya")) {
-            actorFilter = TmdbCastMember(118595L, "Suriya", null, null)
-        } else if (cleanPrompt.contains("dhanush")) {
-            actorFilter = TmdbCastMember(1251347L, "Dhanush", null, null)
-        } else if (cleanPrompt.contains("vikram") || cleanPrompt.contains("chiyaan")) {
-            actorFilter = TmdbCastMember(173873L, "Vikram", null, null)
+        val userMsg = CuratorMessage("User", prompt)
+        val currentMsgs = _curatorChatMessages.value.toMutableList()
+        currentMsgs.add(userMsg)
+        _curatorChatMessages.value = currentMsgs
+
+        _isCurating.value = true
+
+        viewModelScope.launch {
+            val cleanPrompt = prompt.lowercase(Locale.getDefault())
+            
+            // Parse Decade/Year
+            var yearFilter = "All"
+            if (cleanPrompt.contains("90s") || cleanPrompt.contains("1990")) yearFilter = "199"
+            else if (cleanPrompt.contains("80s") || cleanPrompt.contains("1980")) yearFilter = "198"
+            else if (cleanPrompt.contains("2000s")) yearFilter = "200"
+            else if (cleanPrompt.contains("recent") || cleanPrompt.contains("202")) yearFilter = "202"
+            
+            // Parse Genre
+            var genreFilter = "All"
+            if (cleanPrompt.contains("action")) genreFilter = "Action"
+            else if (cleanPrompt.contains("comedy")) genreFilter = "Comedy"
+            else if (cleanPrompt.contains("thriller") || cleanPrompt.contains("gritty") || cleanPrompt.contains("dark")) genreFilter = "Thriller"
+            else if (cleanPrompt.contains("romance") || cleanPrompt.contains("love")) genreFilter = "Romance"
+            else if (cleanPrompt.contains("family")) genreFilter = "Family"
+            else if (cleanPrompt.contains("sci-fi") || cleanPrompt.contains("scifi")) genreFilter = "Sci-Fi"
+            else if (cleanPrompt.contains("horror")) genreFilter = "Horror"
+            else if (cleanPrompt.contains("drama")) genreFilter = "Drama"
+            
+            // Parse Actor
+            var actorFilter: TmdbCastMember? = null
+            if (cleanPrompt.contains("kamal") || cleanPrompt.contains("haasan")) {
+                actorFilter = TmdbCastMember(30784L, "Kamal Haasan", null, null)
+            } else if (cleanPrompt.contains("rajini") || cleanPrompt.contains("superstar")) {
+                actorFilter = TmdbCastMember(819L, "Rajinikanth", null, null)
+            } else if (cleanPrompt.contains("vijay") || cleanPrompt.contains("thalapathy")) {
+                actorFilter = TmdbCastMember(58197L, "Vijay", null, null)
+            } else if (cleanPrompt.contains("ajith") || cleanPrompt.contains("thala")) {
+                actorFilter = TmdbCastMember(75510L, "Ajith Kumar", null, null)
+            } else if (cleanPrompt.contains("suriya")) {
+                actorFilter = TmdbCastMember(118595L, "Suriya", null, null)
+            } else if (cleanPrompt.contains("dhanush")) {
+                actorFilter = TmdbCastMember(1251347L, "Dhanush", null, null)
+            } else if (cleanPrompt.contains("vikram") || cleanPrompt.contains("chiyaan")) {
+                actorFilter = TmdbCastMember(173873L, "Vikram", null, null)
+            }
+            
+            // Parse rating threshold
+            var ratingFilter = "All"
+            if (cleanPrompt.contains("high rating") || cleanPrompt.contains("best") || cleanPrompt.contains("top")) {
+                ratingFilter = "7.5+"
+            } else if (cleanPrompt.contains("underrated")) {
+                ratingFilter = "6.0+"
+            }
+            
+            selectedGenre.value = genreFilter
+            selectedYear.value = yearFilter
+            selectedRating.value = ratingFilter
+            selectedArtist.value = actorFilter
+
+            // Trigger local/remote filtering
+            searchAndFilterMovies(ctx)
+
+            // Wait brief moment to simulate AI reasoning
+            kotlinx.coroutines.delay(800)
+
+            val results = searchResultMovies.value
+            val responseText = if (results.isNotEmpty()) {
+                "I found ${results.size} matches! Here are my top recommendations matching your query:"
+            } else {
+                "I couldn't find any direct matches in our curated databases for those keys. Try adjusting the actor or year keyword!"
+            }
+
+            val aiResponse = CuratorMessage("KollyAI", responseText, results.take(4))
+            val updated = _curatorChatMessages.value.toMutableList()
+            updated.add(aiResponse)
+            _curatorChatMessages.value = updated
+            _isCurating.value = false
         }
-        
-        // Parse rating threshold
-        var ratingFilter = "All"
-        if (cleanPrompt.contains("high rating") || cleanPrompt.contains("best") || cleanPrompt.contains("top")) {
-            ratingFilter = "7.5+"
-        } else if (cleanPrompt.contains("underrated")) {
-            ratingFilter = "6.0+"
-        }
-        
-        selectedGenre.value = genreFilter
-        selectedYear.value = yearFilter
-        selectedRating.value = ratingFilter
-        selectedArtist.value = actorFilter
-        
-        searchAndFilterMovies(ctx)
     }
+
 
     fun searchArtists(ctx: Context, query: String) {
         viewModelScope.launch {
