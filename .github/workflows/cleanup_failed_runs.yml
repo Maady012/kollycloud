@@ -1,0 +1,39 @@
+name: Cleanup Failed Builds
+
+on:
+  schedule:
+    - cron: '0 0 * * *' # Runs daily at midnight UTC to keep the runs history clean
+  workflow_dispatch: # Allows manual trigger from the GitHub Actions UI
+
+concurrency:
+  group: "cleanup-failed"
+  cancel-in-progress: true
+
+permissions:
+  actions: write
+
+jobs:
+  cleanup:
+    name: Clean Failed Workflow Runs
+    runs-on: ubuntu-latest
+    steps:
+      - name: Delete failed runs
+        run: |
+          echo "Fetching failed workflow runs..."
+          failed_runs=$(gh run list --status failure --limit 100 --json databaseId --jq '.[].databaseId')
+          
+          if [ -z "$failed_runs" ]; then
+            echo "No failed workflow runs found to clean."
+            exit 0
+          fi
+          
+          echo "Found the following failed workflow run IDs:"
+          echo "$failed_runs"
+          
+          for run_id in $failed_runs; do
+            echo "Deleting failed run: $run_id"
+            gh run delete "$run_id"
+          done
+          echo "Cleanup completed successfully."
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
