@@ -83,8 +83,18 @@ This document tracks all requests, actions, command logs, pending items, and pro
   - Linked `fetchMovieTrailer` to VM active trailer/minimized states.
   - Added XML Atom parsing integrations for Reddit `/r/kollywood` inside `KollyGameViewModel.kt`.
   - Added Extended Icons library dependency to `build.gradle.kts` for overlay controls.
-- [ ] **Push changes to GitHub:**
-  - Code is committed locally. Remote push pending credential input.
+- [x] **Release & Push changes to GitHub (5.0 Beta):**
+  - Staged and pushed all 5.0 Beta code modifications to origin master.
+  - Compiled stable debug APK and published v5.0-beta release on GitHub.
+
+
+### 🌟 Active Development (Curator AI & Resizable PiP)
+- [ ] **Implement drag-resizable floating PiP overlay:**
+  - Add pointer input gesture handlers to adjust box dimension dynamically.
+  - Implement minimum and maximum scale bounds to maintain aspect ratio.
+- [ ] **Integrate AI-Powered Curator search & recommendation chat:**
+  - Scaffold tokenizer and local ONNX runtime embeddings execution.
+  - Render Conversational AI message streams with embedded recommendation cards.
 
 ### 🚀 Next-Generation Architecture Roadmap
 - [ ] **Hybrid KollyCloud Hot Score & Calendar discovery engine:**
@@ -98,4 +108,5 @@ This document tracks all requests, actions, command logs, pending items, and pro
 - [ ] **Dependency Injection & Clean Architecture:**
   - Integrate Hilt DI for VM scope.
   - Extract filter algorithms into isolated UseCase layers.
+
 
