@@ -21,12 +21,14 @@ import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyRow
+import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.*
+import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
@@ -85,56 +87,285 @@ class KollyGameFragment : Fragment() {
     }
 }
 
+enum class FilterType {
+    GENRE, YEAR, RATING, LANGUAGE, SORT, ARTIST
+}
+
+private val curatedArtists = listOf(
+    TmdbCastMember(819L, "Rajinikanth", null, "/zP1gVjF0P6GqL12V1v7Z8p3xP1e.jpg"),
+    TmdbCastMember(30784L, "Kamal Haasan", null, "/51wR2j81B2TzN1Yx7J1z6y9qP2b.jpg"),
+    TmdbCastMember(58197L, "Vijay", null, "/6T8V4jF2V1y6N7v8V3z1xP3b.jpg"),
+    TmdbCastMember(75510L, "Ajith Kumar", null, "/2g7V4jF2V1y6N7v8V3z1xP4b.jpg"),
+    TmdbCastMember(118595L, "Suriya", null, "/3g7V4jF2V1y6N7v8V3z1xP5b.jpg"),
+    TmdbCastMember(1251347L, "Dhanush", null, "/4g7V4jF2V1y6N7v8V3z1xP6b.jpg"),
+    TmdbCastMember(173873L, "Vikram", null, "/5g7V4jF2V1y6N7v8V3z1xP7b.jpg"),
+    TmdbCastMember(989100L, "Lokesh Kanagaraj", null, "/6g7V4jF2V1y6N7v8V3z1xP8b.jpg"),
+    TmdbCastMember(1682855L, "Nelson Dilipkumar", null, "/7g7V4jF2V1y6N7v8V3z1xP9b.jpg"),
+    TmdbCastMember(236053L, "Mani Ratnam", null, "/21m7N41lYshs6H38L21s6y9qP5b.jpg")
+)
+
 @Composable
-fun FilterChipRow(
-    title: String,
-    items: List<String>,
-    selectedItem: String,
-    onItemSelected: (String) -> Unit
+fun FilterBadge(
+    label: String,
+    onClick: () -> Unit,
+    isHighlight: Boolean = false
 ) {
-    Row(
+    Box(
         modifier = Modifier
-            .fillMaxWidth()
-            .padding(vertical = 4.dp),
-        verticalAlignment = Alignment.CenterVertically
+            .clip(RoundedCornerShape(20.dp))
+            .background(
+                if (isHighlight) Brush.horizontalGradient(listOf(Color(0xFFFFD700), Color(0xFFFFA500)))
+                else Brush.horizontalGradient(listOf(Color(0xFF1E1E2C), Color(0xFF161622)))
+            )
+            .border(
+                width = 1.dp,
+                color = if (isHighlight) Color.Transparent else Color.Gray.copy(alpha = 0.25f),
+                shape = RoundedCornerShape(20.dp)
+            )
+            .clickable { onClick() }
+            .padding(horizontal = 14.dp, vertical = 8.dp)
     ) {
-        Text(
-            text = title,
-            color = Color.Gray,
-            fontSize = 11.sp,
-            fontWeight = FontWeight.Bold,
-            modifier = Modifier
-                .width(55.dp)
-                .padding(start = 16.dp)
-        )
-        LazyRow(
-            contentPadding = PaddingValues(horizontal = 12.dp),
-            horizontalArrangement = Arrangement.spacedBy(8.dp)
+        Row(
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(4.dp)
         ) {
-            items(items) { item ->
-                val isSelected = item == selectedItem
-                Box(
-                    modifier = Modifier
-                        .clip(RoundedCornerShape(8.dp))
-                        .background(if (isSelected) Color(0xFFFFD700) else Color(0xFF1E1E2C))
-                        .border(
-                            width = 1.dp,
-                            color = if (isSelected) Color(0xFFFFD700) else Color.Gray.copy(alpha = 0.2f),
-                            shape = RoundedCornerShape(8.dp)
-                        )
-                        .clickable { onItemSelected(item) }
-                        .padding(horizontal = 10.dp, vertical = 5.dp)
-                ) {
-                    Text(
-                        text = item,
-                        color = if (isSelected) Color.Black else Color.White,
-                        fontSize = 11.sp,
-                        fontWeight = if (isSelected) FontWeight.Bold else FontWeight.Normal
-                    )
-                }
-            }
+            Text(
+                text = label,
+                color = if (isHighlight) Color.Black else Color.White,
+                fontSize = 12.sp,
+                fontWeight = FontWeight.SemiBold
+            )
+            Icon(
+                imageVector = Icons.Default.ArrowDropDown,
+                contentDescription = null,
+                tint = if (isHighlight) Color.Black else Color.Gray,
+                modifier = Modifier.size(16.dp)
+            )
         }
     }
+}
+
+@Composable
+fun PremiumFilterRow(
+    viewModel: KollyGameViewModel,
+    onOpenFilterDialog: (FilterType) -> Unit
+) {
+    val selectedGenre by viewModel.selectedGenre.collectAsState()
+    val selectedYear by viewModel.selectedYear.collectAsState()
+    val selectedRating by viewModel.selectedRating.collectAsState()
+    val selectedLanguage by viewModel.selectedLanguage.collectAsState()
+    val selectedSortOrder by viewModel.selectedSortOrder.collectAsState()
+    val selectedArtist by viewModel.selectedArtist.collectAsState()
+
+    val reverseLangMap = remember { mapOf("ta" to "Tamil", "te" to "Telugu", "ml" to "Malayalam", "hi" to "Hindi", "en" to "English") }
+
+    LazyRow(
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(vertical = 8.dp),
+        contentPadding = PaddingValues(horizontal = 16.dp),
+        horizontalArrangement = Arrangement.spacedBy(8.dp),
+        verticalAlignment = Alignment.CenterVertically
+    ) {
+        item {
+            FilterBadge(
+                label = "Genre: $selectedGenre",
+                onClick = { onOpenFilterDialog(FilterType.GENRE) },
+                isHighlight = selectedGenre != "All"
+            )
+        }
+        item {
+            FilterBadge(
+                label = "Year: $selectedYear",
+                onClick = { onOpenFilterDialog(FilterType.YEAR) },
+                isHighlight = selectedYear != "All"
+            )
+        }
+        item {
+            FilterBadge(
+                label = "Rating: $selectedRating",
+                onClick = { onOpenFilterDialog(FilterType.RATING) },
+                isHighlight = selectedRating != "All"
+            )
+        }
+        item {
+            FilterBadge(
+                label = "Lang: ${reverseLangMap[selectedLanguage] ?: "Tamil"}",
+                onClick = { onOpenFilterDialog(FilterType.LANGUAGE) },
+                isHighlight = selectedLanguage != "ta"
+            )
+        }
+        item {
+            FilterBadge(
+                label = "Sort: $selectedSortOrder",
+                onClick = { onOpenFilterDialog(FilterType.SORT) },
+                isHighlight = selectedSortOrder != "Popularity"
+            )
+        }
+        item {
+            FilterBadge(
+                label = "Artist: ${selectedArtist?.name ?: "All"}",
+                onClick = { onOpenFilterDialog(FilterType.ARTIST) },
+                isHighlight = selectedArtist != null
+            )
+        }
+    }
+}
+
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
+fun <T> FilterSelectionDialog(
+    title: String,
+    searchPlaceholder: String,
+    items: List<T>,
+    selectedItem: T?,
+    onItemSelected: (T) -> Unit,
+    onDismiss: () -> Unit,
+    itemLabel: (T) -> String,
+    onSearchQueryChange: ((String) -> Unit)? = null,
+    isSearching: Boolean = false,
+    itemImage: @Composable ((T) -> Unit)? = null
+) {
+    var searchQuery by remember { mutableStateOf("") }
+    val filteredItems = remember(searchQuery, items) {
+        if (onSearchQueryChange != null) {
+            items
+        } else {
+            if (searchQuery.isBlank()) items
+            else items.filter { itemLabel(it).contains(searchQuery, ignoreCase = true) }
+        }
+    }
+
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        confirmButton = {},
+        dismissButton = {
+            TextButton(onClick = onDismiss) {
+                Text("Close", color = Color(0xFFFFD700), fontWeight = FontWeight.Bold)
+            }
+        },
+        title = {
+            Text(
+                text = title,
+                color = Color.White,
+                fontSize = 18.sp,
+                fontWeight = FontWeight.Bold,
+                modifier = Modifier.fillMaxWidth(),
+                textAlign = TextAlign.Center
+            )
+        },
+        text = {
+            Column(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .heightIn(max = 350.dp)
+            ) {
+                OutlinedTextField(
+                    value = searchQuery,
+                    onValueChange = {
+                        searchQuery = it
+                        onSearchQueryChange?.invoke(it)
+                    },
+                    placeholder = { Text(searchPlaceholder, color = Color.Gray, fontSize = 13.sp) },
+                    leadingIcon = { Icon(imageVector = Icons.Default.Search, contentDescription = null, tint = Color.Gray) },
+                    trailingIcon = {
+                        if (searchQuery.isNotEmpty()) {
+                            IconButton(onClick = {
+                                searchQuery = ""
+                                onSearchQueryChange?.invoke("")
+                            }) {
+                                Icon(imageVector = Icons.Default.Clear, contentDescription = null, tint = Color.Gray)
+                            }
+                        }
+                    },
+                    singleLine = true,
+                    shape = RoundedCornerShape(10.dp),
+                    colors = OutlinedTextFieldDefaults.colors(
+                        focusedTextColor = Color.White,
+                        unfocusedTextColor = Color.White,
+                        focusedContainerColor = Color(0xFF1E1E2C),
+                        unfocusedContainerColor = Color(0xFF1E1E2C),
+                        focusedBorderColor = Color(0xFFFFD700),
+                        unfocusedBorderColor = Color.Gray.copy(alpha = 0.2f)
+                    ),
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(bottom = 12.dp)
+                )
+
+                if (isSearching) {
+                    Box(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .height(150.dp),
+                        contentAlignment = Alignment.Center
+                    ) {
+                        CircularProgressIndicator(color = Color(0xFFFFD700))
+                    }
+                } else if (filteredItems.isEmpty()) {
+                    Box(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .height(150.dp),
+                        contentAlignment = Alignment.Center
+                    ) {
+                        Text("No matching results found.", color = Color.Gray, fontSize = 13.sp)
+                    }
+                } else {
+                    LazyColumn(
+                        verticalArrangement = Arrangement.spacedBy(4.dp),
+                        modifier = Modifier.weight(1f)
+                    ) {
+                        items(filteredItems) { item ->
+                            val isSelected = item == selectedItem
+                            Row(
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .clip(RoundedCornerShape(8.dp))
+                                    .background(if (isSelected) Color(0xFFFFD700).copy(alpha = 0.15f) else Color.Transparent)
+                                    .clickable {
+                                        onItemSelected(item)
+                                        onDismiss()
+                                    }
+                                    .padding(horizontal = 12.dp, vertical = 10.dp),
+                                verticalAlignment = Alignment.CenterVertically,
+                                horizontalArrangement = Arrangement.SpaceBetween
+                            ) {
+                                Row(
+                                    verticalAlignment = Alignment.CenterVertically,
+                                    horizontalArrangement = Arrangement.spacedBy(10.dp)
+                                ) {
+                                    if (itemImage != null) {
+                                        itemImage(item)
+                                    }
+                                    Text(
+                                        text = itemLabel(item),
+                                        color = if (isSelected) Color(0xFFFFD700) else Color.White,
+                                        fontSize = 14.sp,
+                                        fontWeight = if (isSelected) FontWeight.Bold else FontWeight.Normal
+                                    )
+                                }
+                                if (isSelected) {
+                                    Icon(
+                                        imageVector = Icons.Default.Check,
+                                        contentDescription = "Selected",
+                                        tint = Color(0xFFFFD700),
+                                        modifier = Modifier.size(18.dp)
+                                    )
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        },
+        containerColor = Color(0xFF0F0F16),
+        shape = RoundedCornerShape(16.dp),
+        properties = androidx.compose.ui.window.DialogProperties(usePlatformDefaultWidth = false),
+        modifier = Modifier
+            .fillMaxWidth(0.9f)
+            .padding(16.dp)
+    )
 }
 
 @OptIn(ExperimentalMaterial3Api::class)
@@ -153,17 +384,22 @@ fun KollywoodScreen(
     val watchedListMovies by viewModel.watchedListMovies.collectAsState()
     val context = LocalContext.current
 
-    val searchQuery by viewModel.searchQuery.collectAsState()
+val searchQuery by viewModel.searchQuery.collectAsState()
     val selectedGenre by viewModel.selectedGenre.collectAsState()
     val selectedYear by viewModel.selectedYear.collectAsState()
     val selectedRating by viewModel.selectedRating.collectAsState()
     val selectedLanguage by viewModel.selectedLanguage.collectAsState()
+    val selectedSortOrder by viewModel.selectedSortOrder.collectAsState()
+    val selectedArtist by viewModel.selectedArtist.collectAsState()
+    val artistSearchResults by viewModel.artistSearchResults.collectAsState()
+    val isSearchingArtists by viewModel.isSearchingArtists.collectAsState()
 
     val isSearching by viewModel.isSearching.collectAsState()
     val searchResultMovies by viewModel.searchResultMovies.collectAsState()
 
     val langMap = remember { mapOf("Tamil" to "ta", "Telugu" to "te", "Malayalam" to "ml", "Hindi" to "hi", "English" to "en") }
     val reverseLangMap = remember { mapOf("ta" to "Tamil", "te" to "Telugu", "ml" to "Malayalam", "hi" to "Hindi", "en" to "English") }
+    var activeFilterDialog by remember { mutableStateOf<FilterType?>(null) }
 
     Box(
         modifier = Modifier
@@ -264,61 +500,30 @@ fun KollywoodScreen(
                     .padding(horizontal = 16.dp, vertical = 8.dp)
             )
 
-            // Dynamic Advanced Chips Filter Drawer
-            Column(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .background(Color(0xFF0F0F13))
-                    .padding(bottom = 8.dp)
-            ) {
-                FilterChipRow(
-                    title = "Genre",
-                    items = listOf("All", "Action", "Adventure", "Animation", "Comedy", "Crime", "Drama", "Family", "Fantasy", "History", "Horror", "Music", "Mystery", "Romance", "Sci-Fi", "Thriller"),
-                    selectedItem = selectedGenre,
-                    onItemSelected = {
-                        viewModel.selectedGenre.value = it
-                        viewModel.searchAndFilterMovies(context)
-                    }
-                )
-                FilterChipRow(
-                    title = "Year",
-                    items = listOf("All", "2026", "2025", "2024", "2023", "2022", "2021", "2020", "2018", "2015", "2010", "2005", "2003", "2000"),
-                    selectedItem = selectedYear,
-                    onItemSelected = {
-                        viewModel.selectedYear.value = it
-                        viewModel.searchAndFilterMovies(context)
-                    }
-                )
-                FilterChipRow(
-                    title = "Rating",
-                    items = listOf("All", "8.0+", "7.0+", "6.0+", "5.0+"),
-                    selectedItem = selectedRating,
-                    onItemSelected = {
-                        viewModel.selectedRating.value = it
-                        viewModel.searchAndFilterMovies(context)
-                    }
-                )
-                FilterChipRow(
-                    title = "Lang",
-                    items = listOf("Tamil", "Telugu", "Malayalam", "Hindi", "English"),
-                    selectedItem = reverseLangMap[selectedLanguage] ?: "Tamil",
-                    onItemSelected = {
-                        val code = langMap[it] ?: "ta"
-                        viewModel.selectedLanguage.value = code
-                        viewModel.searchAndFilterMovies(context)
-                    }
-                )
-            }
+            PremiumFilterRow(
+                viewModel = viewModel,
+                onOpenFilterDialog = { activeFilterDialog = it }
+            )
 
             // Divider
             HorizontalDivider(color = Color.Gray.copy(alpha = 0.15f), thickness = 1.dp)
 
             // Content Catalog
             if (isSearching) {
+                val searchScrollState = rememberScrollState()
+                val isAtEnd = searchScrollState.value >= searchScrollState.maxValue - 200 && searchScrollState.maxValue > 0
+                val isLoadMoreLoading by viewModel.isLoadMoreLoading.collectAsState()
+
+                LaunchedEffect(isAtEnd) {
+                    if (isAtEnd && !isLoadMoreLoading && !viewModel.isFilterPaginationExhausted) {
+                        viewModel.loadNextPage(context)
+                    }
+                }
+
                 Column(
                     modifier = Modifier
                         .fillMaxSize()
-                        .verticalScroll(rememberScrollState())
+                        .verticalScroll(searchScrollState)
                 ) {
                     Row(
                         modifier = Modifier
@@ -340,6 +545,8 @@ fun KollywoodScreen(
                                 viewModel.selectedYear.value = "All"
                                 viewModel.selectedRating.value = "All"
                                 viewModel.selectedLanguage.value = "ta"
+                                viewModel.selectedSortOrder.value = "Popularity"
+                                viewModel.selectedArtist.value = null
                                 viewModel.searchAndFilterMovies(context)
                             }
                         ) {
@@ -367,7 +574,7 @@ fun KollywoodScreen(
                             modifier = Modifier
                                 .fillMaxWidth()
                                 .padding(horizontal = 16.dp)
-                                .padding(bottom = 40.dp),
+                                .padding(bottom = 20.dp),
                             verticalArrangement = Arrangement.spacedBy(16.dp)
                         ) {
                             chunked.forEach { pair ->
@@ -414,6 +621,21 @@ fun KollywoodScreen(
                                         }
                                     }
                                 }
+                            }
+                        }
+
+                        if (isLoadMoreLoading) {
+                            Box(
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .padding(vertical = 16.dp),
+                                contentAlignment = Alignment.Center
+                            ) {
+                                CircularProgressIndicator(
+                                    color = Color(0xFFFFD700),
+                                    modifier = Modifier.size(24.dp),
+                                    strokeWidth = 2.dp
+                                )
                             }
                         }
                     }
@@ -499,7 +721,7 @@ fun KollywoodScreen(
                                 modifier = Modifier.background(Color.White.copy(alpha = 0.05f), RoundedCornerShape(20.dp))
                             ) {
                                 Icon(
-                                    imageVector = Icons.Default.ArrowBack,
+                                    imageVector = Icons.AutoMirrored.Filled.ArrowBack,
                                     contentDescription = "Back",
                                     tint = Color(0xFFFFD700)
                                 )
@@ -625,7 +847,7 @@ fun KollywoodScreen(
                                 modifier = Modifier.background(Color.White.copy(alpha = 0.05f), RoundedCornerShape(20.dp))
                             ) {
                                 Icon(
-                                    imageVector = Icons.Default.ArrowBack,
+                                    imageVector = Icons.AutoMirrored.Filled.ArrowBack,
                                     contentDescription = "Back",
                                     tint = Color(0xFFFFD700)
                                 )
@@ -721,6 +943,122 @@ fun KollywoodScreen(
                             }
                         }
                     }
+                }
+            }
+        }
+        activeFilterDialog?.let { type ->
+            when (type) {
+                FilterType.GENRE -> {
+                    FilterSelectionDialog(
+                        title = "Select Genre",
+                        searchPlaceholder = "Search genres...",
+                        items = listOf("All", "Action", "Adventure", "Animation", "Comedy", "Crime", "Drama", "Family", "Fantasy", "History", "Horror", "Music", "Mystery", "Romance", "Sci-Fi", "Thriller"),
+                        selectedItem = selectedGenre,
+                        onItemSelected = {
+                            viewModel.selectedGenre.value = it
+                            viewModel.searchAndFilterMovies(context)
+                        },
+                        onDismiss = { activeFilterDialog = null },
+                        itemLabel = { it }
+                    )
+                }
+                FilterType.YEAR -> {
+                    FilterSelectionDialog(
+                        title = "Select Release Year",
+                        searchPlaceholder = "Search release years...",
+                        items = listOf("All", "2026", "2025", "2024", "2023", "2022", "2021", "2020", "2019", "2018", "2017", "2016", "2015", "2012", "2010", "2008", "2005", "2003", "2000", "1995", "1990", "1980"),
+                        selectedItem = selectedYear,
+                        onItemSelected = {
+                            viewModel.selectedYear.value = it
+                            viewModel.searchAndFilterMovies(context)
+                        },
+                        onDismiss = { activeFilterDialog = null },
+                        itemLabel = { it }
+                    )
+                }
+                FilterType.RATING -> {
+                    FilterSelectionDialog(
+                        title = "Select Minimum Rating",
+                        searchPlaceholder = "Search ratings...",
+                        items = listOf("All", "9.0+", "8.0+", "7.0+", "6.0+", "5.0+", "4.0+"),
+                        selectedItem = selectedRating,
+                        onItemSelected = {
+                            viewModel.selectedRating.value = it
+                            viewModel.searchAndFilterMovies(context)
+                        },
+                        onDismiss = { activeFilterDialog = null },
+                        itemLabel = { it }
+                    )
+                }
+                FilterType.LANGUAGE -> {
+                    FilterSelectionDialog(
+                        title = "Select Audio Language",
+                        searchPlaceholder = "Search audio languages...",
+                        items = listOf("Tamil", "Telugu", "Malayalam", "Hindi", "English"),
+                        selectedItem = reverseLangMap[selectedLanguage] ?: "Tamil",
+                        onItemSelected = {
+                            val code = langMap[it] ?: "ta"
+                            viewModel.selectedLanguage.value = code
+                            viewModel.searchAndFilterMovies(context)
+                        },
+                        onDismiss = { activeFilterDialog = null },
+                        itemLabel = { it }
+                    )
+                }
+                FilterType.SORT -> {
+                    FilterSelectionDialog(
+                        title = "Select Sort Order",
+                        searchPlaceholder = "Search sorting criteria...",
+                        items = listOf("Popularity", "Rating", "Release Date", "Title A-Z"),
+                        selectedItem = selectedSortOrder,
+                        onItemSelected = {
+                            viewModel.selectedSortOrder.value = it
+                            viewModel.searchAndFilterMovies(context)
+                        },
+                        onDismiss = { activeFilterDialog = null },
+                        itemLabel = { it }
+                    )
+                }
+                FilterType.ARTIST -> {
+                    val artistItems = remember(artistSearchResults) {
+                        val base = if (artistSearchResults.isEmpty()) curatedArtists else artistSearchResults
+                        listOf(TmdbCastMember(-1L, "All Artists", null, null)) + base
+                    }
+                    FilterSelectionDialog(
+                        title = "Select Cast / Crew",
+                        searchPlaceholder = "Search actor or director...",
+                        items = artistItems,
+                        selectedItem = selectedArtist,
+                        onItemSelected = {
+                            if (it.id == -1L) {
+                                viewModel.selectedArtist.value = null
+                            } else {
+                                viewModel.selectedArtist.value = it
+                            }
+                            viewModel.searchAndFilterMovies(context)
+                        },
+                        onDismiss = { 
+                            activeFilterDialog = null
+                            viewModel.searchArtists(context, "")
+                        },
+                        itemLabel = { it.name },
+                        onSearchQueryChange = { query ->
+                            viewModel.searchArtists(context, query)
+                        },
+                        isSearching = isSearchingArtists,
+                        itemImage = { artist ->
+                            if (artist.id != -1L) {
+                                AsyncImage(
+                                    model = artist.fullProfileUrl ?: "https://images.unsplash.com/photo-1534528741775-53994a69daeb?w=100&auto=format&fit=crop&q=80",
+                                    contentDescription = artist.name,
+                                    contentScale = ContentScale.Crop,
+                                    modifier = Modifier
+                                        .size(36.dp)
+                                        .clip(RoundedCornerShape(18.dp))
+                                )
+                            }
+                        }
+                    )
                 }
             }
         }
@@ -1144,7 +1482,7 @@ fun MovieDetailContent(
                         .background(Color.Black.copy(alpha = 0.6f), RoundedCornerShape(20.dp))
                 ) {
                     Icon(
-                        imageVector = Icons.Default.ArrowBack,
+                        imageVector = Icons.AutoMirrored.Filled.ArrowBack,
                         contentDescription = "Back",
                         tint = Color.White
                     )
@@ -1448,7 +1786,7 @@ fun CastPersonOverlay(
                     modifier = Modifier.background(Color.White.copy(alpha = 0.05f), RoundedCornerShape(20.dp))
                 ) {
                     Icon(
-                        imageVector = Icons.Default.ArrowBack,
+                        imageVector = Icons.AutoMirrored.Filled.ArrowBack,
                         contentDescription = "Back",
                         tint = Color(0xFFFFD700)
                     )
@@ -1644,7 +1982,6 @@ fun YoutubePlayer(
                     useWideViewPort = true
                     allowFileAccess = true
                     allowContentAccess = true
-                    databaseEnabled = true
                     userAgentString = "Mozilla/5.0 (Linux; Android 10; K) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Mobile Safari/537.36"
                 }
                 webChromeClient = android.webkit.WebChromeClient()
@@ -1729,7 +2066,6 @@ fun YoutubeSearchPlayer(
                     useWideViewPort = true
                     allowFileAccess = true
                     allowContentAccess = true
-                    databaseEnabled = true
                     userAgentString = "Mozilla/5.0 (Linux; Android 10; K) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Mobile Safari/537.36"
                 }
                 webChromeClient = android.webkit.WebChromeClient()

@@ -11,7 +11,8 @@ data class TmdbMovie(
     val posterPath: String?,
     val backdropPath: String?,
     val releaseDate: String?,
-    val voteAverage: Double?
+    val voteAverage: Double?,
+    val genreIds: List<Long>? = null
 ) {
     val fullPosterUrl: String?
         get() = when {
@@ -29,6 +30,14 @@ data class TmdbMovie(
 
     companion object {
         fun fromJson(obj: JSONObject): TmdbMovie {
+            val genreIdsList = mutableListOf<Long>()
+            val genreIdsArray = obj.optJSONArray("genre_ids")
+            if (genreIdsArray != null) {
+                for (i in 0 until genreIdsArray.length()) {
+                    genreIdsList.add(genreIdsArray.optLong(i))
+                }
+            }
+
             return TmdbMovie(
                 id = obj.optLong("id"),
                 title = obj.optString("title").ifBlank { obj.optString("original_title") },
@@ -37,7 +46,8 @@ data class TmdbMovie(
                 posterPath = obj.optString("poster_path").takeIf { it.isNotBlank() && it != "null" },
                 backdropPath = obj.optString("backdrop_path").takeIf { it.isNotBlank() && it != "null" },
                 releaseDate = obj.optString("release_date").takeIf { it.isNotBlank() },
-                voteAverage = obj.optDouble("vote_average", 0.0)
+                voteAverage = obj.optDouble("vote_average", 0.0),
+                genreIds = genreIdsList
             )
         }
     }
