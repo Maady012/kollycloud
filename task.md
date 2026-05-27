@@ -13,6 +13,7 @@ This document tracks all requests, actions, command logs, pending items, and pro
 - Push clean, functional updates back to GitHub.
 - Clean up old garbage builds, tags, and releases on GitHub.
 - Publish a fresh premium release of **KollyCloud 4.0 Beta** containing the compiled debug APK.
+- **New Task:** Optimize home screen discovery (Trending, Top Rated, Upcoming, Now Playing). Do not rely solely on TMDb static indexes; design a robust hybrid algorithm incorporating multi-source active signals (Reddit, Google News).
 
 ### 🛠️ Agent Actions (Ur Action)
 - [x] **Auto-Cache UX Bug Fix:** Patched `KollyGameViewModel.kt` to verify `!cachedTrending.isNullOrEmpty()` instead of simple null checks, preventing a previous network failure from persistently serving empty lists `[]` and rendering a blank screen for an hour.
@@ -23,6 +24,7 @@ This document tracks all requests, actions, command logs, pending items, and pro
 - [x] **Verification Building:** Compiled stable & prerelease debug APKs successfully (`BUILD SUCCESSFUL`).
 - [x] **Runtime Testing:** Ran the entire unit test suite (`:app:testStableDebugUnitTest`) with 100% success and zero failures.
 - [x] **GitHub 4.0 Release Creation:** Uploaded the optimized compiled debug APK and published a fresh premium release of **KollyCloud Beta 4.0** on GitHub!
+- [/] **Hybrid Live Homepage Algorithm:** Conceptualized and planned a premium multi-source scoring engine combining TMDB popularity indexes with real-time Google News and Reddit mention frequencies to calculate a hybrid **KollyCloud Hot Score** for organic, active sorting.
 
 ---
 
@@ -74,11 +76,19 @@ This document tracks all requests, actions, command logs, pending items, and pro
 
 ---
 
-## 3. What's Pending (Roadmap)
+## 3. What's Pending & Future Ideas
 
+### 🌟 Active Development
+- [ ] **Implement Hybrid KollyCloud Hot Score & Calendar discovery engine:**
+  - Build the multi-source popularity booster matching Google News/Reddit frequency against TMDb.
+  - Implement Soonest Upcoming calendar sorting (`primary_release_date.asc`).
+  - Lower the review thresholds to capture Kollywood classics in Top Rated.
+
+### 🚀 Next-Generation Architecture Roadmap
 - [ ] **Visual Validation in Emulator/Android Studio Split-Preview:**
   - Leverage mock states and preview setups as detailed in `developer_guidance.md` to design and test custom Compose UI columns.
-- [ ] **Next-Generation Architecture Integration:**
-  - Shift local lists from `SharedPreferences` to reactive **Jetpack DataStore**.
-  - Inject repositories using **Hilt Dependency Injection** for cleaner mock tests.
-  - Implement a **Clean Architecture Domain Layer** by extracting filter algorithms into isolated `UseCase` classes.
+- [ ] **Jetpack DataStore Integration:**
+  - Shift local lists from `SharedPreferences` to reactive DataStore.
+- [ ] **Dependency Injection & Clean Architecture:**
+  - Integrate Hilt DI for VM scope.
+  - Extract filter algorithms into isolated UseCase layers.
