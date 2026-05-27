@@ -78,13 +78,19 @@ This document tracks all requests, actions, command logs, pending items, and pro
 
 ## 3. What's Pending & Future Ideas
 
-### 🌟 Active Development
-- [ ] **Implement Hybrid KollyCloud Hot Score & Calendar discovery engine:**
+- [x] **Global PiP Trailer Theater & Reddit Lounge UI (5.0 Beta):**
+  - Integrated floating trailer PiP overlay inside `KollyGameFragment.kt` using glassmorphic UI.
+  - Linked `fetchMovieTrailer` to VM active trailer/minimized states.
+  - Added XML Atom parsing integrations for Reddit `/r/kollywood` inside `KollyGameViewModel.kt`.
+  - Added Extended Icons library dependency to `build.gradle.kts` for overlay controls.
+- [ ] **Push changes to GitHub:**
+  - Code is committed locally. Remote push pending credential input.
+
+### 🚀 Next-Generation Architecture Roadmap
+- [ ] **Hybrid KollyCloud Hot Score & Calendar discovery engine:**
   - Build the multi-source popularity booster matching Google News/Reddit frequency against TMDb.
   - Implement Soonest Upcoming calendar sorting (`primary_release_date.asc`).
   - Lower the review thresholds to capture Kollywood classics in Top Rated.
-
-### 🚀 Next-Generation Architecture Roadmap
 - [ ] **Visual Validation in Emulator/Android Studio Split-Preview:**
   - Leverage mock states and preview setups as detailed in `developer_guidance.md` to design and test custom Compose UI columns.
 - [ ] **Jetpack DataStore Integration:**
@@ -92,3 +98,4 @@ This document tracks all requests, actions, command logs, pending items, and pro
 - [ ] **Dependency Injection & Clean Architecture:**
   - Integrate Hilt DI for VM scope.
   - Extract filter algorithms into isolated UseCase layers.
+
