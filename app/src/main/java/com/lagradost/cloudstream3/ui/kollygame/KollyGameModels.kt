@@ -12,7 +12,8 @@ data class TmdbMovie(
     val backdropPath: String?,
     val releaseDate: String?,
     val voteAverage: Double?,
-    val genreIds: List<Long>? = null
+    val genreIds: List<Long>? = null,
+    val originalLanguage: String? = null
 ) {
     val fullPosterUrl: String?
         get() = when {
@@ -47,7 +48,8 @@ data class TmdbMovie(
                 backdropPath = obj.optString("backdrop_path").takeIf { it.isNotBlank() && it != "null" },
                 releaseDate = obj.optString("release_date").takeIf { it.isNotBlank() },
                 voteAverage = obj.optDouble("vote_average", 0.0),
-                genreIds = genreIdsList
+                genreIds = genreIdsList,
+                originalLanguage = obj.optString("original_language").takeIf { it.isNotBlank() }
             )
         }
     }

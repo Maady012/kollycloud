@@ -214,6 +214,33 @@ class KollyGameViewModel : ViewModel() {
         "War" to 10752L
     )
 
+    private suspend fun getArtistMovieIds(ctx: Context, artistId: Long): Set<Long> {
+        return withContext(Dispatchers.IO) {
+            try {
+                val apiKey = getTmdbKey(ctx)
+                val url = "https://api.themoviedb.org/3/person/$artistId/movie_credits?api_key=$apiKey"
+                val json = URL(url).openStream().bufferedReader().readText()
+                val root = JSONObject(json)
+                val cast = root.optJSONArray("cast")
+                val crew = root.optJSONArray("crew")
+                val ids = mutableSetOf<Long>()
+                if (cast != null) {
+                    for (i in 0 until cast.length()) {
+                        ids.add(cast.getJSONObject(i).optLong("id"))
+                    }
+                }
+                if (crew != null) {
+                    for (i in 0 until crew.length()) {
+                        ids.add(crew.getJSONObject(i).optLong("id"))
+                    }
+                }
+                ids
+            } catch (e: Exception) {
+                emptySet()
+            }
+        }
+    }
+
     fun searchAndFilterMovies(ctx: Context) {
         viewModelScope.launch {
             val query = searchQuery.value.trim()
@@ -253,16 +280,18 @@ class KollyGameViewModel : ViewModel() {
                 // If query is not empty, use /search/movie first, then filter locally
                 if (query.isNotEmpty()) {
                     val encodedQuery = java.net.URLEncoder.encode(query, "UTF-8")
-                    val searchUrl = "https://api.themoviedb.org/3/search/movie?api_key=$apiKey&query=$encodedQuery&with_original_language=$lang&page=1"
+                    val searchUrl = "https://api.themoviedb.org/3/search/movie?api_key=$apiKey&query=$encodedQuery&page=1"
                     val results = withContext(Dispatchers.IO) { fetchMoviesFromApi(searchUrl) }
                     
+                    val artistMovieIds = if (artist != null) getArtistMovieIds(ctx, artist.id) else emptySet()
                     val genreId = genreMap[genreName]
                     val filtered = results.filter { movie ->
                         val matchesYear = year == "All" || movie.releaseDate?.startsWith(year) == true
                         val matchesRating = rating == "All" || (movie.voteAverage ?: 0.0) >= (rating.replace("+", "").toDoubleOrNull() ?: 0.0)
                         val matchesGenre = genreId == null || movie.genreIds?.contains(genreId) == true
-                        val matchesArtist = artist == null || checkMovieHasArtistLocal(ctx, movie.id, artist.id)
-                        matchesYear && matchesRating && matchesGenre && matchesArtist
+                        val matchesLanguage = lang == "All" || movie.originalLanguage == lang
+                        val matchesArtist = artist == null || artistMovieIds.contains(movie.id)
+                        matchesYear && matchesRating && matchesGenre && matchesLanguage && matchesArtist
                     }
                     _searchResultMovies.value = sortMoviesList(filtered, selectedSortOrder.value)
                 } else {
@@ -368,19 +397,21 @@ class KollyGameViewModel : ViewModel() {
                 
                 if (query.isNotEmpty()) {
                     val encodedQuery = java.net.URLEncoder.encode(query, "UTF-8")
-                    val searchUrl = "https://api.themoviedb.org/3/search/movie?api_key=$apiKey&query=$encodedQuery&with_original_language=$lang&page=$currentFilterPage"
+                    val searchUrl = "https://api.themoviedb.org/3/search/movie?api_key=$apiKey&query=$encodedQuery&page=$currentFilterPage"
                     val results = withContext(Dispatchers.IO) { fetchMoviesFromApi(searchUrl) }
                     
                     if (results.isEmpty()) {
                         isFilterPaginationExhausted = true
                     } else {
+                        val artistMovieIds = if (artist != null) getArtistMovieIds(ctx, artist.id) else emptySet()
                         val genreId = genreMap[genreName]
                         val filtered = results.filter { movie ->
                             val matchesYear = year == "All" || movie.releaseDate?.startsWith(year) == true
                             val matchesRating = rating == "All" || (movie.voteAverage ?: 0.0) >= (rating.replace("+", "").toDoubleOrNull() ?: 0.0)
                             val matchesGenre = genreId == null || movie.genreIds?.contains(genreId) == true
-                            val matchesArtist = artist == null || checkMovieHasArtistLocal(ctx, movie.id, artist.id)
-                            matchesYear && matchesRating && matchesGenre && matchesArtist
+                            val matchesLanguage = lang == "All" || movie.originalLanguage == lang
+                            val matchesArtist = artist == null || artistMovieIds.contains(movie.id)
+                            matchesYear && matchesRating && matchesGenre && matchesLanguage && matchesArtist
                         }
                         
                         val newResults = _searchResultMovies.value + filtered
