@@ -217,7 +217,7 @@ class KollyGameViewModel : ViewModel() {
 
 
     // Map genres to TMDB genre IDs
-    private val genreMap = mapOf(
+    val genreMap = mapOf(
         "Action" to 28L,
         "Adventure" to 12L,
         "Animation" to 16L,
@@ -264,6 +264,17 @@ class KollyGameViewModel : ViewModel() {
         }
     }
 
+    private fun getYearPrefixOrValue(year: String): String {
+        return when (year) {
+            "2020s" -> "202"
+            "2010s" -> "201"
+            "2000s" -> "200"
+            "90s", "1990s" -> "199"
+            "80s", "1980s" -> "198"
+            else -> year
+        }
+    }
+
     fun searchAndFilterMovies(ctx: Context) {
         viewModelScope.launch {
             val query = searchQuery.value.trim()
@@ -291,7 +302,7 @@ class KollyGameViewModel : ViewModel() {
                     val allLocal = getCuratedTrendingMovies() + getCuratedTopRatedMovies() + getCuratedUpcomingMovies()
                     val filtered = allLocal.distinctBy { it.id }.filter { movie ->
                         val matchesQuery = query.isEmpty() || movie.title.contains(query, ignoreCase = true)
-                        val matchesYear = year == "All" || movie.releaseDate?.startsWith(year) == true
+                        val matchesYear = year == "All" || movie.releaseDate?.startsWith(getYearPrefixOrValue(year)) == true
                         val matchesRating = rating == "All" || (movie.voteAverage ?: 0.0) >= (rating.replace("+", "").toDoubleOrNull() ?: 0.0)
                         val matchesGenre = genreMap[genreName] == null || movie.genreIds?.contains(genreMap[genreName]!!) == true
                         matchesQuery && matchesYear && matchesRating && matchesGenre
@@ -309,7 +320,7 @@ class KollyGameViewModel : ViewModel() {
                     val artistMovieIds = if (artist != null) getArtistMovieIds(ctx, artist.id) else emptySet()
                     val genreId = genreMap[genreName]
                     val filtered = results.filter { movie ->
-                        val matchesYear = year == "All" || movie.releaseDate?.startsWith(year) == true
+                        val matchesYear = year == "All" || movie.releaseDate?.startsWith(getYearPrefixOrValue(year)) == true
                         val matchesRating = rating == "All" || (movie.voteAverage ?: 0.0) >= (rating.replace("+", "").toDoubleOrNull() ?: 0.0)
                         val matchesGenre = genreId == null || movie.genreIds?.contains(genreId) == true
                         val matchesLanguage = lang == "All" || movie.originalLanguage == lang
@@ -332,9 +343,16 @@ class KollyGameViewModel : ViewModel() {
                     if (genreId != null) {
                         discoverUrl += "&with_genres=$genreId"
                     }
-                    if (year != "All") {
-                        discoverUrl += "&primary_release_year=$year"
+                    
+                    val processedYear = getYearPrefixOrValue(year)
+                    if (processedYear != "All") {
+                        if (processedYear.length == 3) {
+                            discoverUrl += "&primary_release_date.gte=${processedYear}0-01-01&primary_release_date.lte=${processedYear}9-12-31"
+                        } else {
+                            discoverUrl += "&primary_release_year=$processedYear"
+                        }
                     }
+                    
                     if (ratingThreshold > 0.0) {
                         discoverUrl += "&vote_average.gte=$ratingThreshold"
                     }
@@ -527,7 +545,7 @@ class KollyGameViewModel : ViewModel() {
                         val artistMovieIds = if (artist != null) getArtistMovieIds(ctx, artist.id) else emptySet()
                         val genreId = genreMap[genreName]
                         val filtered = results.filter { movie ->
-                            val matchesYear = year == "All" || movie.releaseDate?.startsWith(year) == true
+                            val matchesYear = year == "All" || movie.releaseDate?.startsWith(getYearPrefixOrValue(year)) == true
                             val matchesRating = rating == "All" || (movie.voteAverage ?: 0.0) >= (rating.replace("+", "").toDoubleOrNull() ?: 0.0)
                             val matchesGenre = genreId == null || movie.genreIds?.contains(genreId) == true
                             val matchesLanguage = lang == "All" || movie.originalLanguage == lang
@@ -552,9 +570,16 @@ class KollyGameViewModel : ViewModel() {
                     if (genreId != null) {
                         discoverUrl += "&with_genres=$genreId"
                     }
-                    if (year != "All") {
-                        discoverUrl += "&primary_release_year=$year"
+                    
+                    val processedYear = getYearPrefixOrValue(year)
+                    if (processedYear != "All") {
+                        if (processedYear.length == 3) {
+                            discoverUrl += "&primary_release_date.gte=${processedYear}0-01-01&primary_release_date.lte=${processedYear}9-12-31"
+                        } else {
+                            discoverUrl += "&primary_release_year=$processedYear"
+                        }
                     }
+                    
                     if (ratingThreshold > 0.0) {
                         discoverUrl += "&vote_average.gte=$ratingThreshold"
                     }

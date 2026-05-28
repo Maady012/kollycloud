@@ -611,8 +611,8 @@ fun KollywoodScreen(
                                                     modifier = Modifier
                                                         .width(100.dp)
                                                         .clickable {
-                                                            viewModel.activeTrailerVideoId.value = "search:${movie.title} trailer"
-                                                            viewModel.isTrailerMinimized.value = false
+                                                            selectedMovie = movie
+                                                            showAiCurator = false
                                                         },
                                                     shape = RoundedCornerShape(8.dp),
                                                     colors = CardDefaults.cardColors(containerColor = Color(0xFF1E1E2C))
@@ -881,9 +881,7 @@ fun KollywoodScreen(
                                 errorMessage = null,
                                 onMovieClick = { selectedMovie = it },
                                 onPlayClick = { movie ->
-                                    viewModel.fetchMovieTrailer(context, movie.id, movie.title)
-                                    viewModel.activeTrailerVideoId.value = "search:${movie.title} trailer" // Immediate search play fallback
-                                    viewModel.isTrailerMinimized.value = false
+                                    selectedMovie = movie
                                 },
                                 onRetryClick = { viewModel.fetchKollywoodMovies(context, forceRefresh = true) },
                                 onReviewClick = { expandedReview = it }
@@ -903,9 +901,7 @@ fun KollywoodScreen(
                                     errorMessage = state.message,
                                     onMovieClick = { selectedMovie = it },
                                     onPlayClick = { movie ->
-                                        viewModel.fetchMovieTrailer(context, movie.id, movie.title)
-                                        viewModel.activeTrailerVideoId.value = "search:${movie.title} trailer"
-                                        viewModel.isTrailerMinimized.value = false
+                                        selectedMovie = movie
                                     },
                                     onRetryClick = { viewModel.fetchKollywoodMovies(context, forceRefresh = true) },
                                     onReviewClick = { expandedReview = it }
@@ -1049,114 +1045,128 @@ fun KollywoodScreen(
             }
         }
 
-        // Global Premium glassmorphic floating PiP card overlay with Drag & Resize Gestures
-        if (activeTrailer != null) {
-            var offsetX by remember { mutableStateOf(0f) }
-            var offsetY by remember { mutableStateOf(0f) }
-            var widthScale by remember { mutableStateOf(1.0f) }
-
-            Box(
-                modifier = Modifier
-                    .fillMaxSize()
-                    .padding(16.dp),
-                contentAlignment = Alignment.BottomEnd
-            ) {
-                val baseWidth = if (isMinimized) 180.dp else 320.dp
-                val baseHeight = if (isMinimized) 110.dp else 220.dp
-                val density = androidx.compose.ui.platform.LocalDensity.current
-
-                Card(
-                    modifier = Modifier
-                        .offset {
-                            androidx.compose.ui.unit.IntOffset(
-                                offsetX.toInt(),
-                                offsetY.toInt()
-                            )
-                        }
-                        .width(baseWidth * widthScale)
-                        .height(baseHeight * widthScale)
-                        .pointerInput(Unit) {
-                            detectDragGestures(
-                                onDrag = { change, dragAmount ->
-                                    change.consume()
-                                    // If dragging from bottom-left corner region, trigger resize instead of move
-                                    val isNearResizeCorner = change.position.x < 40.dp.toPx() && change.position.y > (baseHeight * widthScale - 40.dp).toPx()
-                                    if (isNearResizeCorner) {
-                                        val factor = 1.0f - (dragAmount.x / baseWidth.toPx())
-                                        widthScale = (widthScale * factor).coerceIn(0.6f, 1.8f)
-                                    } else {
-                                        offsetX += dragAmount.x
-                                        offsetY += dragAmount.y
+        // Filter Selection Dialogs display
+        activeFilterDialog?.let { filterType ->
+            val context = LocalContext.current
+            when (filterType) {
+                FilterType.GENRE -> {
+                    FilterSelectionDialog(
+                        title = "Select Genre",
+                        searchPlaceholder = "Search Genre...",
+                        items = listOf("All") + viewModel.genreMap.keys.toList(),
+                        selectedItem = selectedGenre,
+                        onItemSelected = {
+                            viewModel.selectedGenre.value = it
+                            viewModel.searchAndFilterMovies(context)
+                        },
+                        onDismiss = { activeFilterDialog = null },
+                        itemLabel = { it }
+                    )
+                }
+                FilterType.YEAR -> {
+                    FilterSelectionDialog(
+                        title = "Select Year",
+                        searchPlaceholder = "Search Year or Decade...",
+                        items = listOf("All", "2020s", "2010s", "2000s", "90s", "80s") + (2026 downTo 1970).map { it.toString() },
+                        selectedItem = selectedYear,
+                        onItemSelected = {
+                            viewModel.selectedYear.value = it
+                            viewModel.searchAndFilterMovies(context)
+                        },
+                        onDismiss = { activeFilterDialog = null },
+                        itemLabel = { it }
+                    )
+                }
+                FilterType.RATING -> {
+                    FilterSelectionDialog(
+                        title = "Select Rating",
+                        searchPlaceholder = "Search Rating...",
+                        items = listOf("All", "8.5+", "8.0+", "7.5+", "7.0+", "6.5+", "6.0+", "5.0+"),
+                        selectedItem = selectedRating,
+                        onItemSelected = {
+                            viewModel.selectedRating.value = it
+                            viewModel.searchAndFilterMovies(context)
+                        },
+                        onDismiss = { activeFilterDialog = null },
+                        itemLabel = { it }
+                    )
+                }
+                FilterType.LANGUAGE -> {
+                    FilterSelectionDialog(
+                        title = "Select Language",
+                        searchPlaceholder = "Search Language...",
+                        items = listOf("ta", "te", "ml", "hi", "en", "All"),
+                        selectedItem = selectedLanguage,
+                        onItemSelected = {
+                            viewModel.selectedLanguage.value = it
+                            viewModel.searchAndFilterMovies(context)
+                        },
+                        onDismiss = { activeFilterDialog = null },
+                        itemLabel = { reverseLangMap[it] ?: "All" }
+                    )
+                }
+                FilterType.SORT -> {
+                    FilterSelectionDialog(
+                        title = "Sort Order",
+                        searchPlaceholder = "Search Sorting...",
+                        items = listOf("Popularity", "Rating", "Release Date", "Title A-Z"),
+                        selectedItem = selectedSortOrder,
+                        onItemSelected = {
+                            viewModel.selectedSortOrder.value = it
+                            viewModel.searchAndFilterMovies(context)
+                        },
+                        onDismiss = { activeFilterDialog = null },
+                        itemLabel = { it }
+                    )
+                }
+                FilterType.ARTIST -> {
+                    FilterSelectionDialog(
+                        title = "Select Artist",
+                        searchPlaceholder = "Search Cast/Crew Name...",
+                        items = listOf(TmdbCastMember(-1L, "All", null, null)) + curatedArtists + artistSearchResults,
+                        selectedItem = selectedArtist,
+                        onItemSelected = { artist ->
+                            viewModel.selectedArtist.value = if (artist.id == -1L) null else artist
+                            viewModel.searchAndFilterMovies(context)
+                        },
+                        onDismiss = { activeFilterDialog = null },
+                        itemLabel = { it.name },
+                        onSearchQueryChange = { query ->
+                            viewModel.searchArtists(context, query)
+                        },
+                        isSearching = isSearchingArtists,
+                        itemImage = { item ->
+                            if (item.id != -1L) {
+                                val profileUrl = item.fullProfileUrl
+                                if (!profileUrl.isNullOrEmpty()) {
+                                    AsyncImage(
+                                        model = profileUrl,
+                                        contentDescription = item.name,
+                                        modifier = Modifier
+                                            .size(36.dp)
+                                            .clip(androidx.compose.foundation.shape.CircleShape)
+                                            .background(Color.Gray),
+                                        contentScale = ContentScale.Crop
+                                    )
+                                } else {
+                                    Box(
+                                        modifier = Modifier
+                                            .size(36.dp)
+                                            .clip(androidx.compose.foundation.shape.CircleShape)
+                                            .background(Color(0xFF222232)),
+                                        contentAlignment = Alignment.Center
+                                    ) {
+                                        Text(
+                                            text = item.name.firstOrNull()?.toString() ?: "",
+                                            color = Color(0xFFFFD700),
+                                            fontWeight = FontWeight.Bold,
+                                            fontSize = 11.sp
+                                        )
                                     }
                                 }
-                            )
-                        },
-                    shape = RoundedCornerShape(16.dp),
-                    colors = CardDefaults.cardColors(containerColor = Color(0xCC161622)),
-                    border = BorderStroke(1.dp, Color(0xFFFFD700).copy(alpha = 0.4f))
-                ) {
-                    Column(modifier = Modifier.fillMaxSize()) {
-                        // Title bar
-                        Row(
-                            modifier = Modifier
-                                .fillMaxWidth()
-                                .background(Color.Black.copy(alpha = 0.3f))
-                                .padding(horizontal = 8.dp, vertical = 4.dp),
-                            verticalAlignment = Alignment.CenterVertically
-                        ) {
-                            Text(
-                                text = "🍿 Trailer Theater",
-                                fontSize = (10 * widthScale).coerceIn(8f, 14f).sp,
-                                fontWeight = FontWeight.Bold,
-                                color = Color(0xFFFFD700),
-                                modifier = Modifier.weight(1f)
-                            )
-                            IconButton(
-                                onClick = { viewModel.isTrailerMinimized.value = !isMinimized },
-                                modifier = Modifier.size((20 * widthScale).coerceIn(16f, 28f).dp)
-                            ) {
-                                Icon(
-                                    imageVector = if (isMinimized) Icons.Default.Fullscreen else Icons.Default.Minimize,
-                                    contentDescription = "Minimize Toggle",
-                                    tint = Color.White,
-                                    modifier = Modifier.size((12 * widthScale).coerceIn(10f, 18f).dp)
-                                )
-                            }
-                            Spacer(modifier = Modifier.width(6.dp))
-                            IconButton(
-                                onClick = { viewModel.activeTrailerVideoId.value = null },
-                                modifier = Modifier.size((20 * widthScale).coerceIn(16f, 28f).dp)
-                            ) {
-                                Icon(
-                                    imageVector = Icons.Default.Close,
-                                    contentDescription = "Close",
-                                    tint = Color.White,
-                                    modifier = Modifier.size((12 * widthScale).coerceIn(10f, 18f).dp)
-                                )
                             }
                         }
-
-                        // Player container
-                        Box(
-                            modifier = Modifier
-                                .fillMaxWidth()
-                                .weight(1f)
-                                .background(Color.Black)
-                        ) {
-                            val trailerId = activeTrailer!!
-                            if (trailerId.startsWith("search:")) {
-                                YoutubeSearchPlayer(
-                                    searchQuery = trailerId.removePrefix("search:"),
-                                    modifier = Modifier.fillMaxSize()
-                                )
-                            } else {
-                                YoutubePlayer(
-                                    youtubeVideoId = trailerId,
-                                    modifier = Modifier.fillMaxSize()
-                                )
-                            }
-                        }
-                    }
+                    )
                 }
             }
         }
