@@ -78,6 +78,22 @@ class KollyGameViewModel : ViewModel() {
         991007L to "pTAsf2y8E7I"  // Love Insurance Kompaney
     )
 
+    private val localMovieCastMap = mapOf(
+        991101L to listOf("Sivakarthikeyan", "Sai Pallavi"),
+        991102L to listOf("Vijay", "Trisha", "Sanjay Dutt"),
+        991103L to listOf("Vijay", "Prashanth", "Prabhu Deva"),
+        991201L to listOf("Kamal Haasan", "Saranya"),
+        991202L to listOf("Kamal Haasan", "Madhavan"),
+        991203L to listOf("Suriya", "Lijomol Jose"),
+        991001L to listOf("Vijay", "Bobby Deol"),
+        991002L to listOf("Ajith Kumar", "Trisha"),
+        991003L to listOf("Rajinikanth", "Shruti Haasan"),
+        991004L to listOf("Suriya", "Bobby Deol"),
+        991005L to listOf("Ajith Kumar"),
+        991006L to listOf("Rajinikanth", "Amitabh Bachchan"),
+        991007L to listOf("Pradeep Ranganathan")
+    )
+
     private val _movieTrailers = MutableStateFlow<Map<Long, String>>(curatedTrailers)
     val movieTrailers: StateFlow<Map<Long, String>> = _movieTrailers.asStateFlow()
 
@@ -306,7 +322,9 @@ class KollyGameViewModel : ViewModel() {
                         val matchesRating = rating == "All" || (movie.voteAverage ?: 0.0) >= (rating.replace("+", "").toDoubleOrNull() ?: 0.0)
                         val matchesGenre = genreMap[genreName] == null || movie.genreIds?.contains(genreMap[genreName]!!) == true
                         val matchesLanguage = lang == "All" || movie.originalLanguage == lang
-                        val matchesArtist = artist == null || movie.title.contains(artist.name, ignoreCase = true)
+                        val matchesArtist = artist == null || (
+                            localMovieCastMap[movie.id]?.any { cast -> cast.contains(artist.name, ignoreCase = true) || artist.name.contains(cast, ignoreCase = true) } == true
+                        )
                         matchesQuery && matchesYear && matchesRating && matchesGenre && matchesLanguage && matchesArtist
                     }
                     _searchResultMovies.value = sortMoviesList(filtered, selectedSortOrder.value)
