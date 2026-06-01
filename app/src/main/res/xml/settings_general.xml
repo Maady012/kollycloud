@@ -105,6 +105,14 @@
             android:summary="Restore watchlist and watched lists from a backup file" />
     </PreferenceCategory>
 
+    <PreferenceCategory android:title="KollyCloud AI Settings">
+        <EditTextPreference
+            android:key="gemini_api_key"
+            android:title="Gemini API Key"
+            android:summary="Enter your Gemini API key for AI Curator search"
+            android:dialogTitle="Gemini API Key" />
+    </PreferenceCategory>
+
     <PreferenceCategory android:title="@string/pref_category_links">
 
         <Preference

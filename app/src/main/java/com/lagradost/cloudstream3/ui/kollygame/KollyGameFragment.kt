@@ -169,7 +169,7 @@ fun PremiumFilterRow(
     val selectedSortOrder by viewModel.selectedSortOrder.collectAsState()
     val selectedArtist by viewModel.selectedArtist.collectAsState()
 
-    val reverseLangMap = remember { mapOf("ta" to "Tamil", "te" to "Telugu", "ml" to "Malayalam", "hi" to "Hindi", "en" to "English") }
+    val reverseLangMap = remember { mapOf("ta" to "Tamil", "te" to "Telugu", "ml" to "Malayalam", "hi" to "Hindi", "en" to "English", "All" to "All") }
 
     LazyRow(
         modifier = Modifier
@@ -420,7 +420,7 @@ fun KollywoodScreen(
     var curatorPrompt by remember { mutableStateOf("") }
 
     val langMap = remember { mapOf("Tamil" to "ta", "Telugu" to "te", "Malayalam" to "ml", "Hindi" to "hi", "English" to "en") }
-    val reverseLangMap = remember { mapOf("ta" to "Tamil", "te" to "Telugu", "ml" to "Malayalam", "hi" to "Hindi", "en" to "English") }
+    val reverseLangMap = remember { mapOf("ta" to "Tamil", "te" to "Telugu", "ml" to "Malayalam", "hi" to "Hindi", "en" to "English", "All" to "All") }
     var activeFilterDialog by remember { mutableStateOf<FilterType?>(null) }
 
     Box(
@@ -2935,5 +2935,32 @@ fun EyeIcon(
             center = androidx.compose.ui.geometry.Offset(w * 0.5f, h * 0.5f),
             style = if (isWatched) androidx.compose.ui.graphics.drawscope.Fill else androidx.compose.ui.graphics.drawscope.Stroke(width = 1.5.dp.toPx())
         )
+    }
+}
+
+@androidx.compose.ui.tooling.preview.Preview(name = "Premium Filter Badge - Highlighted", showBackground = true)
+@Composable
+fun FilterBadgePreview() {
+    MaterialTheme(colorScheme = darkColorScheme()) {
+        Box(modifier = Modifier.padding(16.dp).background(Color(0xFF0F0F13))) {
+            FilterBadge(
+                label = "Genre: Action",
+                onClick = {},
+                isHighlight = true
+            )
+        }
+    }
+}
+
+@androidx.compose.ui.tooling.preview.Preview(name = "Eye Icon Observed", showBackground = true)
+@Composable
+fun EyeIconPreview() {
+    MaterialTheme(colorScheme = darkColorScheme()) {
+        Box(modifier = Modifier.padding(16.dp).background(Color(0xFF0F0F13))) {
+            EyeIcon(
+                isWatched = true,
+                modifier = Modifier.size(24.dp)
+            )
+        }
     }
 }
